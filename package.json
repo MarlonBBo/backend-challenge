@@ -1,0 +1,65 @@
+{
+  "name": "distributed-wagering-processor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Distributed and idempotent wagering transaction processor",
+  "license": "UNLICENSED",
+  "packageManager": "bun@1.4.3",
+  "engines": {
+    "bun": ">=1.0.0 <2"
+  },
+  "scripts": {
+    "build": "nest build",
+    "start": "bun src/main.ts",
+    "start:dev": "bun --watch src/main.ts",
+    "start:prod": "bun dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"{src,test}/**/*.ts\"",
+    "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
+    "format": "prettier --write \"{src,test}/**/*.ts\" \"*.{json,mjs,yml,yaml}\"",
+    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"*.{json,mjs,yml,yaml}\"",
+    "test": "bun test",
+    "test:unit": "bun test test/unit",
+    "test:integration": "bun test test/integration",
+    "db:migration:create": "mikro-orm migration:create",
+    "db:migration:up": "mikro-orm migration:up",
+    "db:migration:down": "mikro-orm migration:down",
+    "db:migration:list": "mikro-orm migration:list",
+    "db:schema:validate": "mikro-orm schema:fresh --dump"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.0.0",
+    "@mikro-orm/core": "^6.0.0",
+    "@mikro-orm/migrations": "^6.0.0",
+    "@mikro-orm/nestjs": "^6.0.0",
+    "@mikro-orm/postgresql": "^6.0.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "decimal.js": "^10.0.0",
+    "pg": "^8.0.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@mikro-orm/cli": "^6.0.0",
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
+    "@types/bun": "latest",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0"
+  },
+  "mikro-orm": {
+    "configPaths": [
+      "./src/infrastructure/database/mikro-orm.config.ts",
+      "./dist/infrastructure/database/mikro-orm.config.js"
+    ],
+    "useTsNode": true
+  }
+}
