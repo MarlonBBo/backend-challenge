@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 
 import { CurrencyMismatchError, Money } from '../../../../src/domain/shared/value-objects/money';
+import { LedgerDirection } from '../../../../src/domain/ledger/ledger-direction';
 import {
   InsufficientFundsError,
   InvalidInitialBalanceError,
   InvalidWalletMovementError,
   InvalidWalletTimestampError,
   Wallet,
-  WalletBalanceChangeDirection,
 } from '../../../../src/domain/wallet/wallet';
 
 const walletId = '0192f291-27dd-7d3f-8071-5f8685deef37';
@@ -83,7 +83,7 @@ describe('Wallet', () => {
       expect(wallet.balance.toJSON()).toEqual({ amount: '75.00', currency: 'BRL' });
       expect(wallet.version).toBe(2);
       expect(wallet.updatedAt).toEqual(occurredAt);
-      expect(change.direction).toBe(WalletBalanceChangeDirection.Debit);
+      expect(change.direction).toBe(LedgerDirection.Debit);
       expect(change.balanceBefore.toJSON()).toEqual({ amount: '100.00', currency: 'BRL' });
       expect(change.balanceAfter.toJSON()).toEqual({ amount: '75.00', currency: 'BRL' });
       expect(change.walletVersion).toBe(2);
@@ -122,7 +122,7 @@ describe('Wallet', () => {
       expect(wallet.balance.toJSON()).toEqual({ amount: '150.00', currency: 'BRL' });
       expect(wallet.version).toBe(2);
       expect(wallet.updatedAt).toEqual(occurredAt);
-      expect(change.direction).toBe(WalletBalanceChangeDirection.Credit);
+      expect(change.direction).toBe(LedgerDirection.Credit);
       expect(change.balanceBefore.toJSON()).toEqual({ amount: '100.00', currency: 'BRL' });
       expect(change.balanceAfter.toJSON()).toEqual({ amount: '150.00', currency: 'BRL' });
     });

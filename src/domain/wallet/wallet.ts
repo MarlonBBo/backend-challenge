@@ -1,13 +1,9 @@
 import { CurrencyMismatchError, type Money } from '../shared/value-objects/money';
-
-export enum WalletBalanceChangeDirection {
-  Debit = 'DEBIT',
-  Credit = 'CREDIT',
-}
+import { LedgerDirection } from '../ledger/ledger-direction';
 
 export interface WalletBalanceChange {
   readonly walletId: string;
-  readonly direction: WalletBalanceChangeDirection;
+  readonly direction: LedgerDirection;
   readonly money: Money;
   readonly balanceBefore: Money;
   readonly balanceAfter: Money;
@@ -134,22 +130,22 @@ export class Wallet {
       throw new InsufficientFundsError();
     }
 
-    return this.applyBalanceChange(WalletBalanceChangeDirection.Debit, money, at);
+    return this.applyBalanceChange(LedgerDirection.Debit, money, at);
   }
 
   credit(money: Money, at: Date): Readonly<WalletBalanceChange> {
     this.assertCanMove(money, at);
-    return this.applyBalanceChange(WalletBalanceChangeDirection.Credit, money, at);
+    return this.applyBalanceChange(LedgerDirection.Credit, money, at);
   }
 
   private applyBalanceChange(
-    direction: WalletBalanceChangeDirection,
+    direction: LedgerDirection,
     money: Money,
     at: Date,
   ): Readonly<WalletBalanceChange> {
     const balanceBefore = this._balance;
     const balanceAfter =
-      direction === WalletBalanceChangeDirection.Debit
+      direction === LedgerDirection.Debit
         ? balanceBefore.subtract(money)
         : balanceBefore.add(money);
 
