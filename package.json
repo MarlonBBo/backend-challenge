@@ -49,9 +49,11 @@
     "@nestjs/testing": "^11.0.0",
     "@types/bun": "latest",
     "@types/node": "^24.0.0",
+    "ajv": "^8.17.1",
     "eslint": "^9.0.0",
     "globals": "^16.0.0",
     "prettier": "^3.0.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.0.0"
   },

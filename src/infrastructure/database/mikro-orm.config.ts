@@ -4,6 +4,7 @@ import { Migrator } from '@mikro-orm/migrations';
 import { getEnvironment } from '../../config/environment';
 
 const environment = getEnvironment(process.env);
+const isProduction = environment.nodeEnv === 'production';
 
 export default defineConfig({
   clientUrl: environment.database.url,
@@ -12,14 +13,19 @@ export default defineConfig({
   extensions: [Migrator],
   migrations: {
     path: 'dist/infrastructure/database/migrations',
-    pathTs: 'src/infrastructure/database/migrations',
+    pathTs: isProduction
+      ? 'dist/infrastructure/database/migrations'
+      : 'src/infrastructure/database/migrations',
     transactional: true,
     allOrNothing: true,
-    emit: 'ts',
+    emit: isProduction ? 'js' : 'ts',
   },
   pool: {
     min: environment.database.poolMin,
     max: environment.database.poolMax,
+  },
+  discovery: {
+    warnWhenNoEntities: false,
   },
   allowGlobalContext: false,
   debug: environment.nodeEnv === 'development',
