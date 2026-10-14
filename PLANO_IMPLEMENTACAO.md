@@ -321,14 +321,14 @@ Falhas de negócio são terminais e auditáveis. Falhas transitórias de infraes
 - [x] Implementar inbox e outbox no domínio.
 - [x] Implementar eventos de integração tipados.
 - [x] Definir erros e failure codes.
-- [ ] Criar testes unitários do domínio.
+- [x] Criar testes unitários do domínio.
 
 ### Bloco 3: primeiro fluxo vertical
 
-- [ ] Mapear persistência sem acoplar o domínio ao ORM.
-- [ ] Implementar criação da wallet.
-- [ ] Criar transação interna `OPENING` quando necessário.
-- [ ] Criar ledger de abertura no mesmo commit.
+- [x] Mapear persistência sem acoplar o domínio ao ORM.
+- [x] Implementar criação da wallet.
+- [x] Criar transação interna `OPENING` quando necessário.
+- [x] Criar ledger de abertura no mesmo commit.
 - [ ] Implementar o caso de uso central de apostas.
 - [ ] Implementar lock pessimista por wallet.
 - [ ] Implementar hash canônico e idempotência.
@@ -338,9 +338,9 @@ Falhas de negócio são terminais e auditáveis. Falhas transitórias de infraes
 
 ### Testes de saída do Dia 1
 
-- [ ] `Money` rejeita formatos inválidos e conflitos de moeda.
-- [ ] Wallet duplicada é impedida pelo banco.
-- [ ] Abertura cria saldo, transação e ledger atomicamente.
+- [x] `Money` rejeita formatos inválidos e conflitos de moeda.
+- [x] Wallet duplicada é impedida pelo banco.
+- [x] Abertura cria saldo, transação e ledger atomicamente.
 - [ ] Uma aposta processada altera wallet e ledger.
 - [ ] Uma aposta rejeitada não cria ledger.
 - [ ] Duas apostas simultâneas de `80.00` sobre `100.00` resultam em uma processada e uma rejeitada.
@@ -354,13 +354,13 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 
 ### Bloco 1: SQS e inbox
 
-- [ ] Criar fila `wager-transactions.fifo` e sua DLQ no LocalStack.
+- [x] Criar fila `wager-transactions.fifo` e sua DLQ no LocalStack.
 - [ ] Implementar validação do envelope SQS.
 - [ ] Implementar consumidor que reutiliza o caso de uso central.
 - [ ] Registrar inbox na mesma transação financeira.
 - [ ] Confirmar a mensagem somente após o commit.
 - [ ] Classificar erros de negócio, transitórios e permanentes.
-- [ ] Configurar limite de recebimentos e DLQ.
+- [x] Configurar limite de recebimentos e DLQ.
 - [ ] Implementar graceful shutdown e controle de mensagens em andamento.
 
 ### Bloco 2: outbox
