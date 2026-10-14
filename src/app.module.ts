@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './presentation/http/app.controller';
 import { validateEnvironment } from './config/environment';
 import { DatabaseModule } from './infrastructure/database/database.module';
+import { WalletModule } from './application/wallet/wallet.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { DatabaseModule } from './infrastructure/database/database.module';
       validate: validateEnvironment,
     }),
     DatabaseModule,
+    WalletModule,
   ],
   controllers: [AppController],
 })
