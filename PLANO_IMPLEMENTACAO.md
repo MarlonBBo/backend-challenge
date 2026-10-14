@@ -318,8 +318,8 @@ Falhas de negócio são terminais e auditáveis. Falhas transitórias de infraes
 - [x] Implementar `Wallet`.
 - [x] Implementar `WagerTransaction` e estados terminais.
 - [x] Implementar `WalletLedgerEntry` imutável.
-- [ ] Implementar inbox e outbox no domínio.
-- [ ] Implementar eventos de integração tipados.
+- [x] Implementar inbox e outbox no domínio.
+- [x] Implementar eventos de integração tipados.
 - [x] Definir erros e failure codes.
 - [ ] Criar testes unitários do domínio.
 
