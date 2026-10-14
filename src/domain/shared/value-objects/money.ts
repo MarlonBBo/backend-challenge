@@ -56,11 +56,12 @@ export class MoneyOverflowError extends Error {
 }
 
 /**
- * Exact and immutable monetary value.
+ * Valor monetário exato e imutável.
  *
- * Public input is intentionally strict and accepts only canonical, non-negative
- * decimal strings with two fractional digits. Arithmetic may produce a negative
- * value; aggregates decide whether that result is valid for their invariants.
+ * A entrada pública é intencionalmente restrita e aceita apenas strings decimais
+ * canônicas e não negativas com duas casas decimais. Operações aritméticas podem
+ * resultar em um valor negativo; agregações determinam se esse resultado é
+ * válido para seus invariantes.
  */
 export class Money {
   private constructor(
