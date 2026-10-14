@@ -314,7 +314,7 @@ Falhas de negócio são terminais e auditáveis. Falhas transitórias de infraes
 
 ### Bloco 2: domínio
 
-- [ ] Implementar `Money` e suas validações.
+- [x] Implementar `Money` e suas validações.
 - [ ] Implementar `Wallet`.
 - [ ] Implementar `WagerTransaction` e estados terminais.
 - [ ] Implementar `WalletLedgerEntry` imutável.
