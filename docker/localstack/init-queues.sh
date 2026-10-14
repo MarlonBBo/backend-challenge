@@ -10,18 +10,20 @@ EVENTS_QUEUE_NAME="wager-events.fifo"
 awslocal sqs create-queue \
   --region "$REGION" \
   --queue-name "$DLQ_NAME" \
-  --attributes FifoQueue=true,ContentBasedDeduplication=false
+  --attributes '{"FifoQueue":"true","ContentBasedDeduplication":"false"}'
 
 DLQ_ARN="arn:aws:sqs:${REGION}:${ACCOUNT_ID}:${DLQ_NAME}"
-REDRIVE_POLICY="{\"deadLetterTargetArn\":\"${DLQ_ARN}\",\"maxReceiveCount\":\"5\"}"
+QUEUE_ATTRIBUTES="$(printf \
+  '{"FifoQueue":"true","ContentBasedDeduplication":"false","VisibilityTimeout":"30","RedrivePolicy":"{\\"deadLetterTargetArn\\":\\"%s\\",\\"maxReceiveCount\\":\\"5\\"}"}' \
+  "$DLQ_ARN")"
 
 awslocal sqs create-queue \
   --region "$REGION" \
   --queue-name "$QUEUE_NAME" \
-  --attributes "FifoQueue=true,ContentBasedDeduplication=false,VisibilityTimeout=30,RedrivePolicy=${REDRIVE_POLICY}"
+  --attributes "$QUEUE_ATTRIBUTES"
 
 awslocal sqs create-queue \
   --region "$REGION" \
   --queue-name "$EVENTS_QUEUE_NAME" \
-  --attributes FifoQueue=true,ContentBasedDeduplication=false
+  --attributes '{"FifoQueue":"true","ContentBasedDeduplication":"false"}'
 
