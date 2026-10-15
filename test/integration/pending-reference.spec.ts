@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test, spyOn } from 'bun:test';
 import { MikroORM } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
 
@@ -26,6 +26,19 @@ import { Migration20261014000100 } from '../../src/infrastructure/database/migra
 import { MikroOrmWageringUnitOfWork } from '../../src/infrastructure/database/unit-of-work/mikro-orm-wagering.unit-of-work';
 import { MikroOrmCreateWalletUnitOfWork } from '../../src/infrastructure/database/unit-of-work/mikro-orm-create-wallet.unit-of-work';
 import { PendingReferenceWorker } from '../../src/infrastructure/workers/pending-reference.worker';
+import {
+  SQSClient,
+  CreateQueueCommand,
+  GetQueueAttributesCommand,
+  SendMessageCommand,
+  ReceiveMessageCommand,
+  DeleteQueueCommand,
+} from '@aws-sdk/client-sqs';
+import { SqsWagerQueue } from '../../src/infrastructure/messaging/sqs-wager.queue';
+import { SqsWagerConsumer } from '../../src/infrastructure/workers/sqs-wager.consumer';
+import { WAGER_CONSUMER_NAME } from '../../src/infrastructure/messaging/wager-queue';
+import { sha256CanonicalJson } from '../../src/application/shared/canonical-json';
+import { InboxPayloadConflictError } from '../../src/application/wagering/ports/inbox-delivery';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -59,6 +72,294 @@ describe.skipIf(databaseUrl === undefined)('Pending references with PostgreSQL',
   afterAll(async () => {
     if (orm !== undefined) await orm.close(true);
   });
+
+  describe.skipIf(process.env.TEST_SQS_ENDPOINT === undefined)(
+    'SQS and inbox with LocalStack',
+    () => {
+      let client: SQSClient;
+      let queueUrl: string;
+      let dlqUrl: string;
+      let queue: SqsWagerQueue;
+      const options = {
+        enabled: true,
+        visibilitySeconds: 3,
+        heartbeatMs: 1_000,
+        retryBaseSeconds: 1,
+        retryMaxSeconds: 1,
+      };
+
+      beforeAll(async () => {
+        client = new SQSClient({
+          endpoint: process.env.TEST_SQS_ENDPOINT,
+          region: 'us-east-1',
+          credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+        });
+        dlqUrl = (
+          await client.send(
+            new CreateQueueCommand({
+              QueueName: `integration-dlq-${randomUUID()}.fifo`,
+              Attributes: { FifoQueue: 'true' },
+            }),
+          )
+        ).QueueUrl!;
+        const arn = (
+          await client.send(
+            new GetQueueAttributesCommand({ QueueUrl: dlqUrl, AttributeNames: ['QueueArn'] }),
+          )
+        ).Attributes!.QueueArn!;
+        queueUrl = (
+          await client.send(
+            new CreateQueueCommand({
+              QueueName: `integration-wager-${randomUUID()}.fifo`,
+              Attributes: {
+                FifoQueue: 'true',
+                VisibilityTimeout: '3',
+                RedrivePolicy: JSON.stringify({ deadLetterTargetArn: arn, maxReceiveCount: '3' }),
+              },
+            }),
+          )
+        ).QueueUrl!;
+        queue = new SqsWagerQueue(client, queueUrl, dlqUrl, options.visibilitySeconds);
+      });
+
+      afterAll(async () => {
+        if (queueUrl !== undefined)
+          await client.send(new DeleteQueueCommand({ QueueUrl: queueUrl }));
+        if (dlqUrl !== undefined) await client.send(new DeleteQueueCommand({ QueueUrl: dlqUrl }));
+        client?.destroy();
+      });
+
+      function envelope(command: ProcessWagerTransactionCommand) {
+        const { correlationId, ...data } = command;
+        return {
+          messageId: randomUUID(),
+          type: 'WagerTransactionRequested',
+          occurredAt: new Date().toISOString(),
+          correlationId,
+          data,
+        };
+      }
+
+      async function send(body: string, groupId: string) {
+        await client.send(
+          new SendMessageCommand({
+            QueueUrl: queueUrl,
+            MessageBody: body,
+            MessageGroupId: groupId,
+            MessageDeduplicationId: randomUUID(),
+          }),
+        );
+        const delivery = await queue.receive(new AbortController().signal);
+        if (delivery === undefined) throw new Error('Test message was not delivered');
+        return delivery;
+      }
+
+      test('redelivery after commit before ack preserves one inbox, ledger and processed event', async () => {
+        const { wallet, bet } = await fixture();
+        const request = envelope(bet);
+        const delivery = await send(JSON.stringify(request), wallet.id);
+        const consumer = new SqsWagerConsumer(queue, processor, options);
+        const ack = spyOn(queue, 'acknowledge').mockRejectedValueOnce(
+          new Error('simulated crash before ack'),
+        );
+        try {
+          await consumer.handle(delivery);
+        } finally {
+          ack.mockRestore();
+        }
+        const em = orm.em.fork();
+        expect(
+          await em.count(InboxMessageEntity, {
+            consumerName: WAGER_CONSUMER_NAME,
+            messageId: request.messageId,
+          }),
+        ).toBe(1);
+        await reconcile(wallet.id, '75.00');
+        const redelivery = await queue.receive(new AbortController().signal);
+        expect(redelivery?.messageId).toBe(delivery.messageId);
+        expect(redelivery?.receiveCount).toBe(2);
+        await consumer.handle(redelivery!);
+        const transaction = await em.findOneOrFail(WagerTransactionEntity, {
+          idempotencyKey: bet.idempotencyKey,
+        });
+        expect(await em.count(WalletLedgerEntryEntity, { transactionId: transaction.id })).toBe(1);
+        expect(
+          await em.count(OutboxMessageEntity, {
+            aggregateId: transaction.id,
+            eventType: 'WagerTransactionProcessed',
+          }),
+        ).toBe(1);
+        expect(
+          (
+            await em.findOneOrFail(InboxMessageEntity, {
+              consumerName: WAGER_CONSUMER_NAME,
+              messageId: request.messageId,
+            })
+          ).processedAt,
+        ).not.toBeNull();
+        await reconcile(wallet.id, '75.00');
+      }, 30_000);
+
+      test('failure before commit rolls back inbox with wallet, transaction, ledger and outbox', async () => {
+        const { wallet, bet } = await fixture();
+        const request = envelope(bet);
+        const delivery = await send(JSON.stringify(request), wallet.id);
+        const failing: WageringUnitOfWork = {
+          execute: (work) =>
+            unitOfWork.execute((context) =>
+              work({
+                ...context,
+                insertOutboxMessages: () =>
+                  Promise.reject(new Error('simulated precommit failure')),
+              }),
+            ),
+          executeNextPending: (now, work) => unitOfWork.executeNextPending(now, work),
+        };
+        await new SqsWagerConsumer(
+          queue,
+          new ProcessWagerTransactionUseCase(failing),
+          options,
+        ).handle(delivery);
+        const em = orm.em.fork();
+        expect(await em.count(InboxMessageEntity, { messageId: request.messageId })).toBe(0);
+        expect(await em.count(WagerTransactionEntity, { idempotencyKey: bet.idempotencyKey })).toBe(
+          0,
+        );
+        await reconcile(wallet.id, '100.00');
+        const redelivery = await queue.receive(new AbortController().signal);
+        await new SqsWagerConsumer(queue, processor, options).handle(redelivery!);
+        expect(await em.count(InboxMessageEntity, { messageId: request.messageId })).toBe(1);
+        await reconcile(wallet.id, '75.00');
+      }, 30_000);
+
+      test('invalid JSON is delivered to the real DLQ without a financial effect', async () => {
+        const delivery = await send('{invalid', randomUUID());
+        await new SqsWagerConsumer(queue, processor, options).handle(delivery);
+        const result = await client.send(
+          new ReceiveMessageCommand({
+            QueueUrl: dlqUrl,
+            WaitTimeSeconds: 1,
+            MessageAttributeNames: ['All'],
+          }),
+        );
+        expect(result.Messages?.[0]?.Body).toBe('{invalid');
+        expect(result.Messages?.[0]?.MessageAttributes?.failureCode?.StringValue).toBe(
+          'INVALID_WAGER_MESSAGE',
+        );
+      }, 30_000);
+
+      test('concurrent deliveries of one envelope serialize through the inbox', async () => {
+        const { wallet, bet } = await fixture();
+        const request = envelope(bet);
+        const delivery = {
+          consumerName: WAGER_CONSUMER_NAME,
+          messageId: request.messageId,
+          payloadHash: sha256CanonicalJson(request.data),
+        };
+        const results = await Promise.all([
+          processor.execute(bet, delivery),
+          processor.execute(bet, delivery),
+        ]);
+        expect(results.filter((result) => result.idempotentReplay)).toHaveLength(1);
+        expect(
+          await orm.em.fork().count(InboxMessageEntity, { messageId: request.messageId }),
+        ).toBe(1);
+        await reconcile(wallet.id, '75.00');
+      });
+
+      test('reusing an inbox identifier with another payload is rejected without a second debit', async () => {
+        const { wallet, bet } = await fixture();
+        const delivery = {
+          consumerName: WAGER_CONSUMER_NAME,
+          messageId: randomUUID(),
+          payloadHash: sha256CanonicalJson(bet),
+        };
+        await processor.execute(bet, delivery);
+        expect(
+          processor.execute(
+            { ...bet, money: { amount: '30.00', currency: 'BRL' } },
+            { ...delivery, payloadHash: 'a'.repeat(64) },
+          ),
+        ).rejects.toBeInstanceOf(InboxPayloadConflictError);
+        await reconcile(wallet.id, '75.00');
+      });
+
+      test('background consumer polls SQS automatically and drains on shutdown', async () => {
+        const { wallet, bet } = await fixture();
+        const request = envelope(bet);
+        // Keep a cancelled long poll from receiving a later test's message on the server.
+        const ownQueueUrl = (
+          await client.send(
+            new CreateQueueCommand({
+              QueueName: `integration-background-${randomUUID()}.fifo`,
+              Attributes: { FifoQueue: 'true' },
+            }),
+          )
+        ).QueueUrl!;
+        const ownClient = new SQSClient({
+          endpoint: process.env.TEST_SQS_ENDPOINT,
+          region: 'us-east-1',
+          credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+        });
+        const consumer = new SqsWagerConsumer(
+          new SqsWagerQueue(ownClient, ownQueueUrl, dlqUrl, options.visibilitySeconds),
+          processor,
+          options,
+        );
+        consumer.onApplicationBootstrap();
+        try {
+          await client.send(
+            new SendMessageCommand({
+              QueueUrl: ownQueueUrl,
+              MessageBody: JSON.stringify(request),
+              MessageGroupId: wallet.id,
+              MessageDeduplicationId: randomUUID(),
+            }),
+          );
+          const deadline = Date.now() + 10_000;
+          let processed = false;
+          while (Date.now() < deadline) {
+            processed =
+              (
+                await orm.em.fork().findOne(InboxMessageEntity, {
+                  messageId: request.messageId,
+                  consumerName: WAGER_CONSUMER_NAME,
+                })
+              )?.processedAt != null;
+            if (processed) break;
+            await Bun.sleep(25);
+          }
+          expect(processed).toBe(true);
+        } finally {
+          await consumer.beforeApplicationShutdown();
+          await client.send(new DeleteQueueCommand({ QueueUrl: ownQueueUrl }));
+        }
+        await reconcile(wallet.id, '75.00');
+      }, 30_000);
+
+      test('transient failures reach DLQ after the configured receive limit', async () => {
+        const { wallet, bet } = await fixture();
+        let delivery = await send(JSON.stringify(envelope(bet)), wallet.id);
+        const consumer = new SqsWagerConsumer(
+          queue,
+          { execute: () => Promise.reject(new Error('temporary outage')) },
+          options,
+        );
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          await consumer.handle(delivery);
+          await queue.changeVisibility(delivery.receiptHandle, 0);
+          if (attempt < 3) delivery = (await queue.receive(new AbortController().signal))!;
+        }
+        // The next receive triggers the queue's redrive policy.
+        await client.send(new ReceiveMessageCommand({ QueueUrl: queueUrl, WaitTimeSeconds: 1 }));
+        const dlq = await client.send(
+          new ReceiveMessageCommand({ QueueUrl: dlqUrl, WaitTimeSeconds: 2 }),
+        );
+        expect(dlq.Messages?.[0]?.Body).toBe(delivery.body);
+        await reconcile(wallet.id, '100.00');
+      }, 30_000);
+    },
+  );
 
   async function fixture(
     kind: WagerTransactionKind.Refund | WagerTransactionKind.Rollback = WagerTransactionKind.Refund,

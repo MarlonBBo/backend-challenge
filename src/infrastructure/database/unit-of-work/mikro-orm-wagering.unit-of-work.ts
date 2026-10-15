@@ -14,6 +14,7 @@ import { WalletLedgerEntryRepository } from '../repositories/wallet-ledger-entry
 import { WalletRepository } from '../repositories/wallet.repository';
 import type { WagerTransaction } from '../../../domain/wagering/wager-transaction';
 import type { Wallet } from '../../../domain/wallet/wallet';
+import { InboxMessageRepository } from '../repositories/inbox-message.repository';
 
 @Injectable()
 export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
@@ -21,6 +22,7 @@ export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
   private readonly transactions = new WagerTransactionRepository();
   private readonly ledger = new WalletLedgerEntryRepository();
   private readonly outbox = new OutboxMessageRepository();
+  private readonly inbox = new InboxMessageRepository();
 
   constructor(private readonly entityManager: EntityManager) {}
 
@@ -69,6 +71,8 @@ export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
 
   private context(transactionalEntityManager: EntityManager): WageringTransactionContext {
     return {
+      receiveInbox: (delivery) => this.inbox.receive(transactionalEntityManager, delivery),
+      completeInbox: (message) => this.inbox.complete(transactionalEntityManager, message),
       findTransactionByIdempotencyKey: (idempotencyKey) =>
         this.transactions.findByIdempotencyKey(transactionalEntityManager, idempotencyKey),
       findTransactionByExternalId: (providerId, externalTransactionId) =>

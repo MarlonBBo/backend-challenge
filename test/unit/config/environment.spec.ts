@@ -19,6 +19,17 @@ const validEnvironment = {
 } as const;
 
 describe('environment configuration', () => {
+  it('validates SQS heartbeat and retry bounds', () => {
+    expect(
+      getEnvironment({ ...validEnvironment, SQS_CONSUMER_ENABLED: 'false' }).sqsConsumer.enabled,
+    ).toBe(false);
+    expect(() => getEnvironment({ ...validEnvironment, SQS_HEARTBEAT_MS: '30000' })).toThrow(
+      'Invalid environment configuration',
+    );
+    expect(() => getEnvironment({ ...validEnvironment, SQS_RETRY_BASE_SECONDS: '400' })).toThrow(
+      'Invalid environment configuration',
+    );
+  });
   it('parses retry settings and supports disabling the worker', () => {
     const environment = getEnvironment({
       ...validEnvironment,

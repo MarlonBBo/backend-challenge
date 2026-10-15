@@ -5,10 +5,14 @@ import type {
   WagerTransactionKind,
 } from '../../../domain/wagering/wager-transaction';
 import type { Wallet } from '../../../domain/wallet/wallet';
+import type { InboxMessage } from '../../../domain/messaging/inbox-message';
+import type { InboxDelivery } from './inbox-delivery';
 
 export const WAGERING_UNIT_OF_WORK = Symbol('WAGERING_UNIT_OF_WORK');
 
 export interface WageringTransactionContext {
+  receiveInbox(delivery: InboxDelivery): Promise<InboxMessage>;
+  completeInbox(message: InboxMessage): Promise<void>;
   findTransactionByIdempotencyKey(idempotencyKey: string): Promise<WagerTransaction | undefined>;
   findTransactionByExternalId(
     providerId: string,

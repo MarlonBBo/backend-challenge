@@ -22,6 +22,7 @@ import {
 import { InsufficientFundsError, type Wallet } from '../../domain/wallet/wallet';
 import { sha256CanonicalJson } from '../shared/canonical-json';
 import { ReferenceRetryPolicy } from './reference-retry-policy';
+import { InboxPayloadConflictError, type InboxDelivery } from './ports/inbox-delivery';
 import {
   MissingTransactionResultError,
   WagerIdempotencyConflictError,
@@ -140,6 +141,7 @@ export class ProcessWagerTransactionUseCase {
 
   async execute(
     command: ProcessWagerTransactionCommand,
+    delivery?: InboxDelivery,
   ): Promise<Readonly<ProcessWagerTransactionResult>> {
     const money = Money.from(command.money);
     const payloadHash = sha256CanonicalJson({
@@ -155,10 +157,10 @@ export class ProcessWagerTransactionUseCase {
     });
 
     try {
-      return await this.executeOnce(command, money, payloadHash);
+      return await this.executeOnce(command, money, payloadHash, delivery);
     } catch (error) {
       if (error instanceof ConcurrentIdempotencyError) {
-        return this.executeOnce(command, money, payloadHash);
+        return this.executeOnce(command, money, payloadHash, delivery);
       }
 
       if (error instanceof ConcurrentExternalTransactionError) {
@@ -176,49 +178,66 @@ export class ProcessWagerTransactionUseCase {
     command: ProcessWagerTransactionCommand,
     money: Money,
     payloadHash: string,
+    delivery?: InboxDelivery,
   ): Promise<Readonly<ProcessWagerTransactionResult>> {
     return this.unitOfWork.execute(async (context) => {
-      const existing = await context.findTransactionByIdempotencyKey(command.idempotencyKey);
-      if (existing !== undefined) {
-        return this.replay(existing, payloadHash, command.idempotencyKey);
+      const inbox = delivery === undefined ? undefined : await context.receiveInbox(delivery);
+      if (inbox !== undefined && !inbox.matchesPayload(delivery!.payloadHash)) {
+        throw new InboxPayloadConflictError();
       }
-
-      const externalTransaction = await context.findTransactionByExternalId(
-        command.providerId,
-        command.externalTransactionId,
-      );
-      if (externalTransaction !== undefined) {
-        throw new ExternalTransactionAlreadyExistsError(
-          command.providerId,
-          command.externalTransactionId,
-        );
+      const result = await this.processInContext(context, command, money, payloadHash);
+      if (inbox !== undefined && !inbox.isProcessed()) {
+        inbox.markProcessed(new Date());
+        await context.completeInbox(inbox);
       }
-
-      const wallet = await context.lockWallet(command.walletId);
-      if (wallet === undefined) {
-        throw new WagerWalletNotFoundError(command.walletId);
-      }
-
-      const existingAfterLock = await context.findTransactionByIdempotencyKey(
-        command.idempotencyKey,
-      );
-      if (existingAfterLock !== undefined) {
-        return this.replay(existingAfterLock, payloadHash, command.idempotencyKey);
-      }
-
-      const externalAfterLock = await context.findTransactionByExternalId(
-        command.providerId,
-        command.externalTransactionId,
-      );
-      if (externalAfterLock !== undefined) {
-        throw new ExternalTransactionAlreadyExistsError(
-          command.providerId,
-          command.externalTransactionId,
-        );
-      }
-
-      return this.processNew(context, command, money, payloadHash, wallet);
+      return result;
     });
+  }
+
+  private async processInContext(
+    context: WageringTransactionContext,
+    command: ProcessWagerTransactionCommand,
+    money: Money,
+    payloadHash: string,
+  ): Promise<Readonly<ProcessWagerTransactionResult>> {
+    const existing = await context.findTransactionByIdempotencyKey(command.idempotencyKey);
+    if (existing !== undefined) {
+      return this.replay(existing, payloadHash, command.idempotencyKey);
+    }
+
+    const externalTransaction = await context.findTransactionByExternalId(
+      command.providerId,
+      command.externalTransactionId,
+    );
+    if (externalTransaction !== undefined) {
+      throw new ExternalTransactionAlreadyExistsError(
+        command.providerId,
+        command.externalTransactionId,
+      );
+    }
+
+    const wallet = await context.lockWallet(command.walletId);
+    if (wallet === undefined) {
+      throw new WagerWalletNotFoundError(command.walletId);
+    }
+
+    const existingAfterLock = await context.findTransactionByIdempotencyKey(command.idempotencyKey);
+    if (existingAfterLock !== undefined) {
+      return this.replay(existingAfterLock, payloadHash, command.idempotencyKey);
+    }
+
+    const externalAfterLock = await context.findTransactionByExternalId(
+      command.providerId,
+      command.externalTransactionId,
+    );
+    if (externalAfterLock !== undefined) {
+      throw new ExternalTransactionAlreadyExistsError(
+        command.providerId,
+        command.externalTransactionId,
+      );
+    }
+
+    return this.processNew(context, command, money, payloadHash, wallet);
   }
 
   private async processNew(

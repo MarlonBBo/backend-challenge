@@ -13,7 +13,8 @@ export class WagerTransactionRepository {
     entityManager: EntityManager,
     now: Date,
   ): Promise<WagerTransaction | undefined> {
-    // Lock the wallet first, as HTTP processing does. Other workers skip busy wallets.
+    // Bloqueie a carteira primeiro, assim como faz o processamento HTTP. 
+    // Outros processos ignoram carteiras que estejam ocupadas.
     const rows = await entityManager.execute<{ id: string }[]>(
       `
       select t.id

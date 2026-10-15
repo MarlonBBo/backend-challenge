@@ -11,7 +11,6 @@ import {
   Post,
   Res,
 } from '@nestjs/common';
-import { z } from 'zod';
 
 import {
   ProcessWagerTransactionUseCase,
@@ -22,54 +21,8 @@ import {
   WagerWalletNotFoundError,
 } from '../../application/wagering/process-wager-transaction.errors';
 import { ExternalTransactionAlreadyExistsError } from '../../application/wagering/ports/wagering-unit-of-work';
-import {
-  WagerTransactionKind,
-  WagerTransactionStatus,
-} from '../../domain/wagering/wager-transaction';
-
-const processWagerTransactionSchema = z
-  .object({
-    providerId: z.string().trim().min(1).max(100),
-    externalTransactionId: z.string().trim().min(1).max(255),
-    playerId: z.uuid(),
-    walletId: z.uuid(),
-    roundId: z.string().trim().min(1).max(255),
-    gameId: z.string().trim().min(1).max(255),
-    kind: z.enum([
-      WagerTransactionKind.Bet,
-      WagerTransactionKind.Win,
-      WagerTransactionKind.Loss,
-      WagerTransactionKind.Refund,
-      WagerTransactionKind.Rollback,
-    ]),
-    money: z.object({
-      amount: z.string().regex(/^(?:0|[1-9]\d{0,17})\.\d{2}$/),
-      currency: z.literal('BRL'),
-    }),
-    referenceExternalTransactionId: z.string().trim().min(1).max(255).optional(),
-  })
-  .superRefine((value, context) => {
-    const requiresReference =
-      value.kind === WagerTransactionKind.Refund || value.kind === WagerTransactionKind.Rollback;
-    const forbidsReference =
-      value.kind === WagerTransactionKind.Bet || value.kind === WagerTransactionKind.Loss;
-
-    if (requiresReference && value.referenceExternalTransactionId === undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['referenceExternalTransactionId'],
-        message: `${value.kind} requires a reference`,
-      });
-    }
-
-    if (forbidsReference && value.referenceExternalTransactionId !== undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['referenceExternalTransactionId'],
-        message: `${value.kind} cannot have a reference`,
-      });
-    }
-  });
+import { WagerTransactionStatus } from '../../domain/wagering/wager-transaction';
+import { processWagerTransactionSchema } from '../../application/wagering/wager-transaction.schema';
 
 interface PassthroughHttpResponse {
   status(code: number): unknown;

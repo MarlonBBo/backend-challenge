@@ -359,13 +359,13 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 ### Bloco 1: SQS e inbox
 
 - [x] Criar fila `wager-transactions.fifo` e sua DLQ no LocalStack.
-- [ ] Implementar validação do envelope SQS.
-- [ ] Implementar consumidor que reutiliza o caso de uso central.
-- [ ] Registrar inbox na mesma transação financeira.
-- [ ] Confirmar a mensagem somente após o commit.
-- [ ] Classificar erros de negócio, transitórios e permanentes.
+- [x] Implementar validação do envelope SQS.
+- [x] Implementar consumidor que reutiliza o caso de uso central.
+- [x] Registrar inbox na mesma transação financeira.
+- [x] Confirmar a mensagem somente após o commit.
+- [x] Classificar erros de negócio, transitórios e permanentes.
 - [x] Configurar limite de recebimentos e DLQ.
-- [ ] Implementar graceful shutdown e controle de mensagens em andamento.
+- [x] Implementar graceful shutdown e controle de mensagens em andamento.
 
 ### Bloco 2: outbox
 
@@ -396,12 +396,12 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 
 ### Testes de saída do Dia 2
 
-- [ ] Redelivery da mesma mensagem não duplica efeitos.
-- [ ] Falha antes do commit permite retry seguro.
-- [ ] Falha depois do commit e antes do ack permite redelivery seguro.
+- [x] Redelivery da mesma mensagem não duplica efeitos.
+- [x] Falha antes do commit permite retry seguro.
+- [x] Falha depois do commit e antes do ack permite redelivery seguro.
 - [ ] Dois publishers não perdem eventos.
 - [x] REFUND/ROLLBACK anterior à referência é processado posteriormente.
-- [ ] Mensagem permanentemente inválida chega à DLQ.
+- [x] Mensagem permanentemente inválida chega à DLQ.
 
 ### Critério de conclusão do Dia 2
 

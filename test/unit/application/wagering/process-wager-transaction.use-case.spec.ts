@@ -21,12 +21,15 @@ import {
   type WagerTransaction,
 } from '../../../../src/domain/wagering/wager-transaction';
 import { Wallet } from '../../../../src/domain/wallet/wallet';
+import { InboxMessage } from '../../../../src/domain/messaging/inbox-message';
+import { InboxPayloadConflictError } from '../../../../src/application/wagering/ports/inbox-delivery';
 
 const walletId = '0192f291-27dd-7d3f-8071-5f8685deef37';
 const playerId = '0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1';
 
 class InMemoryWageringUnitOfWork implements WageringUnitOfWork {
   readonly transactions: WagerTransaction[] = [];
+  readonly inbox: InboxMessage[] = [];
   readonly ledgerEntries: WalletLedgerEntry[] = [];
   readonly outboxMessages: OutboxMessage[] = [];
   walletUpdates = 0;
@@ -54,6 +57,18 @@ class InMemoryWageringUnitOfWork implements WageringUnitOfWork {
 
   execute<T>(work: (context: WageringTransactionContext) => Promise<T>): Promise<T> {
     return work({
+      receiveInbox: (delivery) => {
+        let message = this.inbox.find(
+          (entry) =>
+            entry.messageId === delivery.messageId && entry.consumerName === delivery.consumerName,
+        );
+        if (message === undefined) {
+          message = InboxMessage.receive({ ...delivery, receivedAt: new Date() });
+          this.inbox.push(message);
+        }
+        return Promise.resolve(message);
+      },
+      completeInbox: () => Promise.resolve(),
       findTransactionByIdempotencyKey: (key) =>
         Promise.resolve(
           this.transactions.find((transaction) => transaction.idempotencyKey === key),
@@ -125,6 +140,20 @@ function command(
 }
 
 describe('ProcessWagerTransactionUseCase', () => {
+  test('records a processed inbox and replays redelivery without financial effects', async () => {
+    const unitOfWork = new InMemoryWageringUnitOfWork(openWallet());
+    const useCase = new ProcessWagerTransactionUseCase(unitOfWork);
+    const delivery = { consumerName: 'consumer', messageId: 'message', payloadHash: 'hash' };
+    await useCase.execute(command(), delivery);
+    const replay = await useCase.execute(command(), delivery);
+    expect(replay.idempotentReplay).toBe(true);
+    expect(unitOfWork.inbox).toHaveLength(1);
+    expect(unitOfWork.inbox[0]?.isProcessed()).toBe(true);
+    expect(unitOfWork.ledgerEntries).toHaveLength(1);
+    expect(
+      useCase.execute(command(), { ...delivery, payloadHash: 'different' }),
+    ).rejects.toBeInstanceOf(InboxPayloadConflictError);
+  });
   function pendingCommand(): ProcessWagerTransactionCommand {
     return command({
       externalTransactionId: 'refund-before-bet',
