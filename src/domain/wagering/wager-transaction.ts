@@ -223,11 +223,21 @@ export class WagerTransaction {
   }
 
   reject(code: FailureCode, at: Date, resultBalance?: Money, reference?: WagerTransaction): void {
+    this.assertNotTerminal();
+    WagerTransaction.assertValidTimestamp(at);
     this.assertResultBalance(resultBalance);
     this._referenceTransactionId = reference?.id;
     this._resultBalance = resultBalance;
     this._nextReferenceAttemptAt = undefined;
     this.moveToFailedState(WagerTransactionStatus.Rejected, code, at);
+  }
+
+  recordReferenceAttempt(): void {
+    this.assertNotTerminal();
+    if (this._status !== WagerTransactionStatus.PendingReference) {
+      throw new InvalidWagerTransactionError('Only pending references can be retried');
+    }
+    this._referenceAttempts += 1;
   }
 
   fail(code: FailureCode, at: Date): void {

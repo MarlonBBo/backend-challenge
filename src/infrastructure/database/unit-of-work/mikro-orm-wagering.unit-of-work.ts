@@ -12,6 +12,8 @@ import { OutboxMessageRepository } from '../repositories/outbox-message.reposito
 import { WagerTransactionRepository } from '../repositories/wager-transaction.repository';
 import { WalletLedgerEntryRepository } from '../repositories/wallet-ledger-entry.repository';
 import { WalletRepository } from '../repositories/wallet.repository';
+import type { WagerTransaction } from '../../../domain/wagering/wager-transaction';
+import type { Wallet } from '../../../domain/wallet/wallet';
 
 @Injectable()
 export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
@@ -24,32 +26,11 @@ export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
 
   async execute<T>(work: (context: WageringTransactionContext) => Promise<T>): Promise<T> {
     try {
-      return await this.entityManager.transactional(async (transactionalEntityManager) =>
-        work({
-          findTransactionByIdempotencyKey: (idempotencyKey) =>
-            this.transactions.findByIdempotencyKey(transactionalEntityManager, idempotencyKey),
-          findTransactionByExternalId: (providerId, externalTransactionId) =>
-            this.transactions.findByExternalId(
-              transactionalEntityManager,
-              providerId,
-              externalTransactionId,
-            ),
-          findProcessedReversal: (referenceTransactionId, kind) =>
-            this.transactions.findProcessedReversal(
-              transactionalEntityManager,
-              referenceTransactionId,
-              kind,
-            ),
-          lockWallet: (walletId) =>
-            this.wallets.findByIdForUpdate(transactionalEntityManager, walletId),
-          insertTransaction: (transaction) =>
-            this.transactions.insert(transactionalEntityManager, transaction),
-          updateWallet: (wallet) => this.wallets.update(transactionalEntityManager, wallet),
-          insertLedgerEntry: (entry) => this.ledger.insert(transactionalEntityManager, entry),
-          insertOutboxMessages: (messages) =>
-            this.outbox.insertMany(transactionalEntityManager, messages),
-        }),
-      );
+      return await this.entityManager
+        .fork()
+        .transactional(async (transactionalEntityManager) =>
+          work(this.context(transactionalEntityManager)),
+        );
     } catch (error) {
       if (error instanceof UniqueConstraintViolationException) {
         if (error.message.includes('wager_transactions_idempotency_key_unique')) {
@@ -63,5 +44,55 @@ export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
 
       throw error;
     }
+  }
+
+  executeNextPending<T>(
+    now: Date,
+    work: (
+      context: WageringTransactionContext,
+      transaction: WagerTransaction,
+      wallet: Wallet,
+    ) => Promise<T>,
+  ): Promise<T | undefined> {
+    return this.entityManager.fork().transactional(async (entityManager) => {
+      const transaction = await this.transactions.findNextPendingForUpdate(entityManager, now);
+      if (transaction === undefined) {
+        return undefined;
+      }
+      const wallet = await this.wallets.findByIdForUpdate(entityManager, transaction.walletId);
+      if (wallet === undefined) {
+        throw new Error(`Wallet ${transaction.walletId} missing for pending transaction`);
+      }
+      return work(this.context(entityManager), transaction, wallet);
+    });
+  }
+
+  private context(transactionalEntityManager: EntityManager): WageringTransactionContext {
+    return {
+      findTransactionByIdempotencyKey: (idempotencyKey) =>
+        this.transactions.findByIdempotencyKey(transactionalEntityManager, idempotencyKey),
+      findTransactionByExternalId: (providerId, externalTransactionId) =>
+        this.transactions.findByExternalId(
+          transactionalEntityManager,
+          providerId,
+          externalTransactionId,
+        ),
+      findProcessedReversal: (referenceTransactionId, kind) =>
+        this.transactions.findProcessedReversal(
+          transactionalEntityManager,
+          referenceTransactionId,
+          kind,
+        ),
+      lockWallet: (walletId) =>
+        this.wallets.findByIdForUpdate(transactionalEntityManager, walletId),
+      insertTransaction: (transaction) =>
+        this.transactions.insert(transactionalEntityManager, transaction),
+      updateTransaction: (transaction) =>
+        this.transactions.update(transactionalEntityManager, transaction),
+      updateWallet: (wallet) => this.wallets.update(transactionalEntityManager, wallet),
+      insertLedgerEntry: (entry) => this.ledger.insert(transactionalEntityManager, entry),
+      insertOutboxMessages: (messages) =>
+        this.outbox.insertMany(transactionalEntityManager, messages),
+    };
   }
 }

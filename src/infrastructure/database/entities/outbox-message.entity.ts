@@ -8,7 +8,7 @@ export class OutboxMessageEntity {
   @Property({ fieldName: 'aggregate_id', type: 'uuid' })
   aggregateId!: string;
 
-  @Property({ fieldName: 'event_type', length: 100 })
+  @Property({ fieldName: 'event_type', type: 'string', length: 100 })
   eventType!: string;
 
   @Property({ type: 'json' })
@@ -17,7 +17,7 @@ export class OutboxMessageEntity {
   @Property({ fieldName: 'occurred_at', columnType: 'timestamptz' })
   occurredAt!: Date;
 
-  @Property()
+  @Property({ type: 'integer' })
   attempts = 0;
 
   @Property({ fieldName: 'next_attempt_at', columnType: 'timestamptz', nullable: true })

@@ -21,6 +21,7 @@ import {
 } from '../../domain/wagering/wager-transaction';
 import { InsufficientFundsError, type Wallet } from '../../domain/wallet/wallet';
 import { sha256CanonicalJson } from '../shared/canonical-json';
+import { ReferenceRetryPolicy } from './reference-retry-policy';
 import {
   MissingTransactionResultError,
   WagerIdempotencyConflictError,
@@ -65,7 +66,77 @@ export class ProcessWagerTransactionUseCase {
   constructor(
     @Inject(WAGERING_UNIT_OF_WORK)
     private readonly unitOfWork: WageringUnitOfWork,
+    @Inject(ReferenceRetryPolicy)
+    private readonly referenceRetryPolicy: ReferenceRetryPolicy = new ReferenceRetryPolicy(),
   ) {}
+
+  reprocessNextPending(
+    now = new Date(),
+  ): Promise<Readonly<ProcessWagerTransactionResult> | undefined> {
+    return this.unitOfWork.executeNextPending(now, async (context, transaction, wallet) => {
+      let ledgerEntry: WalletLedgerEntry | undefined;
+      if (
+        this.referenceRetryPolicy.isExpired(
+          transaction.createdAt,
+          transaction.referenceAttempts,
+          now,
+        )
+      ) {
+        transaction.reject(FailureCode.ReferenceNotFound, now, wallet.balance);
+      } else {
+        transaction.recordReferenceAttempt();
+        const reference = await context.findTransactionByExternalId(
+          transaction.providerId,
+          transaction.referenceExternalTransactionId!,
+        );
+        if (
+          reference === undefined ||
+          reference.status === WagerTransactionStatus.PendingReference ||
+          reference.status === WagerTransactionStatus.Pending
+        ) {
+          if (
+            this.referenceRetryPolicy.isExpired(
+              transaction.createdAt,
+              transaction.referenceAttempts,
+              now,
+            )
+          ) {
+            transaction.reject(FailureCode.ReferenceNotFound, now, wallet.balance);
+          } else {
+            transaction.markPendingReference(
+              wallet.balance,
+              this.referenceRetryPolicy.nextAttemptAt(
+                transaction.createdAt,
+                transaction.referenceAttempts,
+                now,
+              ),
+            );
+          }
+        } else {
+          ledgerEntry = await this.processBalanceMovement(
+            context,
+            transaction,
+            reference,
+            wallet,
+            now,
+          );
+        }
+      }
+
+      await context.updateTransaction(transaction);
+      if (ledgerEntry !== undefined) {
+        await context.updateWallet(wallet);
+        await context.insertLedgerEntry(ledgerEntry);
+      }
+      // The pending event was already recorded when the transaction was accepted.
+      if (transaction.isTerminal()) {
+        await context.insertOutboxMessages(
+          this.createOutboxMessages(transaction, wallet, ledgerEntry, transaction.id, now),
+        );
+      }
+      return this.resultFrom(transaction, false);
+    });
+  }
 
   async execute(
     command: ProcessWagerTransactionCommand,
@@ -191,8 +262,16 @@ export class ProcessWagerTransactionUseCase {
               command.referenceExternalTransactionId,
             );
 
-      if (command.referenceExternalTransactionId !== undefined && reference === undefined) {
-        transaction.markPendingReference(wallet.balance, new Date(now.getTime() + 1_000));
+      if (
+        command.referenceExternalTransactionId !== undefined &&
+        (reference === undefined ||
+          reference.status === WagerTransactionStatus.PendingReference ||
+          reference.status === WagerTransactionStatus.Pending)
+      ) {
+        transaction.markPendingReference(
+          wallet.balance,
+          this.referenceRetryPolicy.nextAttemptAt(transaction.createdAt, 0, now),
+        );
       } else {
         ledgerEntry = await this.processBalanceMovement(
           context,

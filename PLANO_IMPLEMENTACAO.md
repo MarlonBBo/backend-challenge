@@ -273,6 +273,10 @@ Garantia principal: `UNIQUE (consumer_name, message_id)`.
 
 - A operação passa para `PENDING_REFERENCE`.
 - Um worker a reprocessa com backoff exponencial.
+- O worker consulta a cada 1 segundo e processa até 25 operações por ciclo, uma transação por operação. Seleciona a carteira com `FOR UPDATE OF w SKIP LOCKED`, mantendo a ordem de locks usada pelo HTTP; uma carteira ocupada fica para outro ciclo.
+- O contador começa em zero na aceitação e aumenta a cada tentativa do worker. O backoff é de 1 segundo inicialmente, depois 2, 4, 8 segundos, até 5 minutos. A próxima tentativa nunca ultrapassa o TTL.
+- O limite padrão é de 20 tentativas ou 24 horas desde a criação, o que ocorrer primeiro. As tentativas limitam referências inválidas a cerca de uma hora sob operação contínua; o TTL também cobre longas indisponibilidades e reinícios. Ao atingir o TTL, a operação é rejeitada mesmo que a referência tenha chegado depois do prazo.
+- Todos os parâmetros podem ser ajustados pelas variáveis `REFERENCE_*` de `.env.example`. O worker não sobrepõe ciclos e aguarda a transação em andamento durante o shutdown.
 - A estratégia inicial será um número pequeno e documentado de tentativas, ajustável por configuração.
 - Ao esgotar tentativas ou TTL, a operação passa para `REJECTED` com `REFERENCE_NOT_FOUND`.
 
@@ -376,9 +380,9 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 
 - [x] Persistir `PENDING_REFERENCE`.
 - [x] Emitir `WagerTransactionPendingReference`.
-- [ ] Implementar worker de reprocessamento.
-- [ ] Aplicar backoff e limite de tentativas/TTL.
-- [ ] Rejeitar com `REFERENCE_NOT_FOUND` ao esgotar o limite.
+- [x] Implementar worker de reprocessamento.
+- [x] Aplicar backoff e limite de tentativas/TTL.
+- [x] Rejeitar com `REFERENCE_NOT_FOUND` ao esgotar o limite.
 - [x] Impedir REFUND e ROLLBACK duplicados.
 
 ### Bloco 4: consultas e operação
@@ -396,7 +400,7 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 - [ ] Falha antes do commit permite retry seguro.
 - [ ] Falha depois do commit e antes do ack permite redelivery seguro.
 - [ ] Dois publishers não perdem eventos.
-- [ ] REFUND/ROLLBACK anterior à referência é processado posteriormente.
+- [x] REFUND/ROLLBACK anterior à referência é processado posteriormente.
 - [ ] Mensagem permanentemente inválida chega à DLQ.
 
 ### Critério de conclusão do Dia 2
@@ -413,7 +417,7 @@ Entradas HTTP e SQS compartilham as mesmas regras, e reinícios ou redeliveries 
 - [ ] Executar com pelo menos três processos/instâncias.
 - [ ] Simular worker morto após commit e antes do ack.
 - [ ] Executar dois publishers sobre a mesma outbox.
-- [ ] Testar referência entregue fora de ordem.
+- [x] Testar referência entregue fora de ordem.
 - [ ] Reiniciar os serviços e comprovar a consistência final.
 - [ ] Verificar `wallet.balance == saldo reconstruído pelo ledger` em todos os testes relevantes.
 

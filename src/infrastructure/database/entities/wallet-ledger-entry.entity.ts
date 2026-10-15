@@ -13,7 +13,7 @@ export class WalletLedgerEntryEntity {
   @Property({ fieldName: 'transaction_id', type: 'uuid' })
   transactionId!: string;
 
-  @Property({ length: 8 })
+  @Property({ type: 'string', length: 8 })
   direction!: LedgerDirection;
 
   @Property({ columnType: 'numeric(20,2)' })

@@ -20,6 +20,7 @@ export interface WageringTransactionContext {
   ): Promise<WagerTransaction | undefined>;
   lockWallet(walletId: string): Promise<Wallet | undefined>;
   insertTransaction(transaction: WagerTransaction): Promise<void>;
+  updateTransaction(transaction: WagerTransaction): Promise<void>;
   updateWallet(wallet: Wallet): Promise<void>;
   insertLedgerEntry(entry: WalletLedgerEntry): Promise<void>;
   insertOutboxMessages(messages: readonly OutboxMessage[]): Promise<void>;
@@ -27,6 +28,14 @@ export interface WageringTransactionContext {
 
 export interface WageringUnitOfWork {
   execute<T>(work: (context: WageringTransactionContext) => Promise<T>): Promise<T>;
+  executeNextPending<T>(
+    now: Date,
+    work: (
+      context: WageringTransactionContext,
+      transaction: WagerTransaction,
+      wallet: Wallet,
+    ) => Promise<T>,
+  ): Promise<T | undefined>;
 }
 
 export class ConcurrentIdempotencyError extends Error {

@@ -14,7 +14,7 @@ export class WalletEntity {
   @Property({ columnType: 'numeric(20,2)' })
   balance!: string;
 
-  @Property()
+  @Property({ type: 'integer' })
   version!: number;
 
   @Property({ fieldName: 'created_at', columnType: 'timestamptz' })
