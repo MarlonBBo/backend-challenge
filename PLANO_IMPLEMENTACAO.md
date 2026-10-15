@@ -332,7 +332,7 @@ Falhas de negócio são terminais e auditáveis. Falhas transitórias de infraes
 - [x] Implementar o caso de uso central de apostas.
 - [x] Implementar lock pessimista por wallet.
 - [x] Implementar hash canônico e idempotência.
-- [ ] Implementar BET e LOSS primeiro; depois WIN, REFUND e ROLLBACK.
+- [x] Implementar BET e LOSS primeiro; depois WIN, REFUND e ROLLBACK.
 - [x] Gravar outbox no mesmo commit.
 - [ ] Expor os endpoints essenciais.
 
@@ -374,12 +374,12 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 
 ### Bloco 3: referências fora de ordem
 
-- [ ] Persistir `PENDING_REFERENCE`.
-- [ ] Emitir `WagerTransactionPendingReference`.
+- [x] Persistir `PENDING_REFERENCE`.
+- [x] Emitir `WagerTransactionPendingReference`.
 - [ ] Implementar worker de reprocessamento.
 - [ ] Aplicar backoff e limite de tentativas/TTL.
 - [ ] Rejeitar com `REFERENCE_NOT_FOUND` ao esgotar o limite.
-- [ ] Impedir REFUND e ROLLBACK duplicados.
+- [x] Impedir REFUND e ROLLBACK duplicados.
 
 ### Bloco 4: consultas e operação
 

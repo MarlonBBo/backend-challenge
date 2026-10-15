@@ -1,6 +1,9 @@
 import type { WalletLedgerEntry } from '../../../domain/ledger/wallet-ledger-entry';
 import type { OutboxMessage } from '../../../domain/messaging/outbox-message';
-import type { WagerTransaction } from '../../../domain/wagering/wager-transaction';
+import type {
+  WagerTransaction,
+  WagerTransactionKind,
+} from '../../../domain/wagering/wager-transaction';
 import type { Wallet } from '../../../domain/wallet/wallet';
 
 export const WAGERING_UNIT_OF_WORK = Symbol('WAGERING_UNIT_OF_WORK');
@@ -10,6 +13,10 @@ export interface WageringTransactionContext {
   findTransactionByExternalId(
     providerId: string,
     externalTransactionId: string,
+  ): Promise<WagerTransaction | undefined>;
+  findProcessedReversal(
+    referenceTransactionId: string,
+    kind: WagerTransactionKind.Refund | WagerTransactionKind.Rollback,
   ): Promise<WagerTransaction | undefined>;
   lockWallet(walletId: string): Promise<Wallet | undefined>;
   insertTransaction(transaction: WagerTransaction): Promise<void>;

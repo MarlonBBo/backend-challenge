@@ -1,6 +1,10 @@
 import type { EntityManager } from '@mikro-orm/postgresql';
 
-import type { WagerTransaction } from '../../../domain/wagering/wager-transaction';
+import {
+  WagerTransactionStatus,
+  type WagerTransaction,
+  type WagerTransactionKind,
+} from '../../../domain/wagering/wager-transaction';
 import { WagerTransactionEntity } from '../entities/wager-transaction.entity';
 import { WagerTransactionMapper } from '../mappers/wager-transaction.mapper';
 
@@ -25,6 +29,19 @@ export class WagerTransactionRepository {
     const entity = await entityManager.findOne(WagerTransactionEntity, {
       providerId,
       externalTransactionId,
+    });
+    return entity === null ? undefined : WagerTransactionMapper.toDomain(entity);
+  }
+
+  async findProcessedReversal(
+    entityManager: EntityManager,
+    referenceTransactionId: string,
+    kind: WagerTransactionKind.Refund | WagerTransactionKind.Rollback,
+  ): Promise<WagerTransaction | undefined> {
+    const entity = await entityManager.findOne(WagerTransactionEntity, {
+      referenceTransactionId,
+      kind,
+      status: WagerTransactionStatus.Processed,
     });
     return entity === null ? undefined : WagerTransactionMapper.toDomain(entity);
   }

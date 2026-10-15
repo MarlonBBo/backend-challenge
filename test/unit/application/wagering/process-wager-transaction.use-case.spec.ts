@@ -10,6 +10,7 @@ import type {
   WageringUnitOfWork,
 } from '../../../../src/application/wagering/ports/wagering-unit-of-work';
 import type { WalletLedgerEntry } from '../../../../src/domain/ledger/wallet-ledger-entry';
+import { LedgerDirection } from '../../../../src/domain/ledger/ledger-direction';
 import type { OutboxMessage } from '../../../../src/domain/messaging/outbox-message';
 import { Money } from '../../../../src/domain/shared/value-objects/money';
 import { FailureCode } from '../../../../src/domain/wagering/failure-code';
@@ -34,13 +35,24 @@ class InMemoryWageringUnitOfWork implements WageringUnitOfWork {
   execute<T>(work: (context: WageringTransactionContext) => Promise<T>): Promise<T> {
     return work({
       findTransactionByIdempotencyKey: (key) =>
-        Promise.resolve(this.transactions.find((transaction) => transaction.idempotencyKey === key)),
+        Promise.resolve(
+          this.transactions.find((transaction) => transaction.idempotencyKey === key),
+        ),
       findTransactionByExternalId: (providerId, externalId) =>
         Promise.resolve(
           this.transactions.find(
             (transaction) =>
               transaction.providerId === providerId &&
               transaction.externalTransactionId === externalId,
+          ),
+        ),
+      findProcessedReversal: (referenceTransactionId, kind) =>
+        Promise.resolve(
+          this.transactions.find(
+            (transaction) =>
+              transaction.referenceTransactionId === referenceTransactionId &&
+              transaction.kind === kind &&
+              transaction.status === WagerTransactionStatus.Processed,
           ),
         ),
       lockWallet: () => Promise.resolve(this.wallet),
@@ -172,5 +184,131 @@ describe('ProcessWagerTransactionUseCase', () => {
     ).rejects.toBeInstanceOf(WagerIdempotencyConflictError);
     expect(unitOfWork.transactions).toHaveLength(1);
     expect(unitOfWork.ledgerEntries).toHaveLength(1);
+  });
+
+  test('processes WIN with an optional BET reference and credits the wallet', async () => {
+    const unitOfWork = new InMemoryWageringUnitOfWork(openWallet());
+    const useCase = new ProcessWagerTransactionUseCase(unitOfWork);
+    await useCase.execute(command());
+
+    const result = await useCase.execute(
+      command({
+        externalTransactionId: 'win-1',
+        idempotencyKey: 'provider-a:win-1',
+        kind: WagerTransactionKind.Win,
+        referenceExternalTransactionId: 'transaction-1',
+      }),
+    );
+
+    expect(result.status).toBe(WagerTransactionStatus.Processed);
+    expect(result.balance).toEqual({ amount: '100.00', currency: 'BRL' });
+    expect(unitOfWork.ledgerEntries).toHaveLength(2);
+    expect(unitOfWork.ledgerEntries[1]?.direction).toBe(LedgerDirection.Credit);
+  });
+
+  test('processes REFUND once and rejects a duplicate refund', async () => {
+    const unitOfWork = new InMemoryWageringUnitOfWork(openWallet());
+    const useCase = new ProcessWagerTransactionUseCase(unitOfWork);
+    await useCase.execute(command());
+
+    const refund = await useCase.execute(
+      command({
+        externalTransactionId: 'refund-1',
+        idempotencyKey: 'provider-a:refund-1',
+        kind: WagerTransactionKind.Refund,
+        referenceExternalTransactionId: 'transaction-1',
+      }),
+    );
+    const duplicate = await useCase.execute(
+      command({
+        externalTransactionId: 'refund-2',
+        idempotencyKey: 'provider-a:refund-2',
+        kind: WagerTransactionKind.Refund,
+        referenceExternalTransactionId: 'transaction-1',
+      }),
+    );
+
+    expect(refund.status).toBe(WagerTransactionStatus.Processed);
+    expect(refund.balance).toEqual({ amount: '100.00', currency: 'BRL' });
+    expect(duplicate.status).toBe(WagerTransactionStatus.Rejected);
+    expect(duplicate.failureCode).toBe(FailureCode.ReferenceAlreadyRefunded);
+    expect(unitOfWork.ledgerEntries).toHaveLength(2);
+  });
+
+  test('processes ROLLBACK of BET as a credit', async () => {
+    const unitOfWork = new InMemoryWageringUnitOfWork(openWallet());
+    const useCase = new ProcessWagerTransactionUseCase(unitOfWork);
+    await useCase.execute(command());
+
+    const rollback = await useCase.execute(
+      command({
+        externalTransactionId: 'rollback-1',
+        idempotencyKey: 'provider-a:rollback-1',
+        kind: WagerTransactionKind.Rollback,
+        referenceExternalTransactionId: 'transaction-1',
+      }),
+    );
+
+    expect(rollback.status).toBe(WagerTransactionStatus.Processed);
+    expect(rollback.balance).toEqual({ amount: '100.00', currency: 'BRL' });
+    expect(unitOfWork.ledgerEntries[1]?.direction).toBe(LedgerDirection.Credit);
+  });
+
+  test('rejects ROLLBACK of WIN when its debit would make the balance negative', async () => {
+    const unitOfWork = new InMemoryWageringUnitOfWork(openWallet('10.00'));
+    const useCase = new ProcessWagerTransactionUseCase(unitOfWork);
+    await useCase.execute(
+      command({
+        externalTransactionId: 'win-1',
+        idempotencyKey: 'provider-a:win-1',
+        kind: WagerTransactionKind.Win,
+        money: { amount: '50.00', currency: 'BRL' },
+      }),
+    );
+    await useCase.execute(
+      command({
+        externalTransactionId: 'bet-after-win',
+        idempotencyKey: 'provider-a:bet-after-win',
+        money: { amount: '60.00', currency: 'BRL' },
+      }),
+    );
+
+    const rollback = await useCase.execute(
+      command({
+        externalTransactionId: 'rollback-win-1',
+        idempotencyKey: 'provider-a:rollback-win-1',
+        kind: WagerTransactionKind.Rollback,
+        money: { amount: '50.00', currency: 'BRL' },
+        referenceExternalTransactionId: 'win-1',
+      }),
+    );
+
+    expect(rollback.status).toBe(WagerTransactionStatus.Rejected);
+    expect(rollback.failureCode).toBe(FailureCode.ReversalWouldCauseNegativeBalance);
+    expect(rollback.balance).toEqual({ amount: '0.00', currency: 'BRL' });
+    expect(unitOfWork.wallet?.balance.toJSON().amount).toBe('0.00');
+  });
+
+  test('persists a missing reference as PENDING_REFERENCE without ledger', async () => {
+    const unitOfWork = new InMemoryWageringUnitOfWork(openWallet());
+    const useCase = new ProcessWagerTransactionUseCase(unitOfWork);
+
+    const result = await useCase.execute(
+      command({
+        externalTransactionId: 'refund-before-bet',
+        idempotencyKey: 'provider-a:refund-before-bet',
+        kind: WagerTransactionKind.Refund,
+        referenceExternalTransactionId: 'future-bet',
+      }),
+    );
+
+    expect(result.status).toBe(WagerTransactionStatus.PendingReference);
+    expect(result.balance).toEqual({ amount: '100.00', currency: 'BRL' });
+    expect(unitOfWork.ledgerEntries).toHaveLength(0);
+    expect(unitOfWork.walletUpdates).toBe(0);
+    expect(unitOfWork.transactions[0]?.nextReferenceAttemptAt).toBeDefined();
+    expect(unitOfWork.outboxMessages.map((message) => message.eventType)).toEqual([
+      'WagerTransactionPendingReference',
+    ]);
   });
 });

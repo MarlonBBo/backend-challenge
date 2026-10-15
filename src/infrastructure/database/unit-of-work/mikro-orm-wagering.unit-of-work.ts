@@ -34,6 +34,12 @@ export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
               providerId,
               externalTransactionId,
             ),
+          findProcessedReversal: (referenceTransactionId, kind) =>
+            this.transactions.findProcessedReversal(
+              transactionalEntityManager,
+              referenceTransactionId,
+              kind,
+            ),
           lockWallet: (walletId) =>
             this.wallets.findByIdForUpdate(transactionalEntityManager, walletId),
           insertTransaction: (transaction) =>

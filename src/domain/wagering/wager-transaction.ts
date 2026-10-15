@@ -49,6 +49,8 @@ export interface WagerTransactionState extends CreateWagerTransactionProps {
   readonly referenceTransactionId?: string;
   readonly failureCode?: FailureCode;
   readonly resultBalance?: Money;
+  readonly referenceAttempts?: number;
+  readonly nextReferenceAttemptAt?: Date;
   readonly processedAt?: Date;
 }
 
@@ -108,6 +110,8 @@ export class WagerTransaction {
     private _referenceTransactionId?: string,
     private _failureCode?: FailureCode,
     private _resultBalance?: Money,
+    private _referenceAttempts = 0,
+    private _nextReferenceAttemptAt?: Date,
     private _processedAt?: Date,
   ) {}
 
@@ -175,6 +179,16 @@ export class WagerTransaction {
     return this._resultBalance;
   }
 
+  get referenceAttempts(): number {
+    return this._referenceAttempts;
+  }
+
+  get nextReferenceAttemptAt(): Date | undefined {
+    return this._nextReferenceAttemptAt === undefined
+      ? undefined
+      : new Date(this._nextReferenceAttemptAt);
+  }
+
   markProcessed(reference: WagerTransaction | undefined, at: Date, resultBalance?: Money): void {
     this.assertNotTerminal();
     WagerTransaction.assertValidTimestamp(at);
@@ -184,10 +198,11 @@ export class WagerTransaction {
     this._referenceTransactionId = reference?.id;
     this._status = WagerTransactionStatus.Processed;
     this._resultBalance = resultBalance;
+    this._nextReferenceAttemptAt = undefined;
     this._processedAt = new Date(at);
   }
 
-  markPendingReference(): void {
+  markPendingReference(resultBalance?: Money, nextAttemptAt?: Date): void {
     this.assertNotTerminal();
 
     if (this.referenceExternalTransactionId === undefined) {
@@ -196,12 +211,22 @@ export class WagerTransaction {
       );
     }
 
+    this.assertResultBalance(resultBalance);
+    if (nextAttemptAt !== undefined) {
+      WagerTransaction.assertValidTimestamp(nextAttemptAt);
+    }
+
     this._status = WagerTransactionStatus.PendingReference;
+    this._resultBalance = resultBalance;
+    this._nextReferenceAttemptAt =
+      nextAttemptAt === undefined ? undefined : new Date(nextAttemptAt);
   }
 
-  reject(code: FailureCode, at: Date, resultBalance?: Money): void {
+  reject(code: FailureCode, at: Date, resultBalance?: Money, reference?: WagerTransaction): void {
     this.assertResultBalance(resultBalance);
+    this._referenceTransactionId = reference?.id;
     this._resultBalance = resultBalance;
+    this._nextReferenceAttemptAt = undefined;
     this.moveToFailedState(WagerTransactionStatus.Rejected, code, at);
   }
 
@@ -277,6 +302,10 @@ export class WagerTransaction {
       state.referenceTransactionId,
       state.failureCode,
       state.resultBalance,
+      state.referenceAttempts ?? 0,
+      state.nextReferenceAttemptAt === undefined
+        ? undefined
+        : new Date(state.nextReferenceAttemptAt),
       state.processedAt === undefined ? undefined : new Date(state.processedAt),
     );
   }

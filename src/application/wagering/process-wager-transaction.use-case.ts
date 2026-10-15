@@ -4,9 +4,11 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { WalletBalanceChanged } from '../../domain/events/wallet-events';
 import {
+  WagerTransactionPendingReference,
   WagerTransactionProcessed,
   WagerTransactionRejected,
 } from '../../domain/events/wagering-events';
+import { LedgerDirection } from '../../domain/ledger/ledger-direction';
 import { WalletLedgerEntry } from '../../domain/ledger/wallet-ledger-entry';
 import { OutboxMessage } from '../../domain/messaging/outbox-message';
 import { Money, type MoneyProps } from '../../domain/shared/value-objects/money';
@@ -15,6 +17,7 @@ import {
   WagerTransaction,
   WagerTransactionKind,
   WagerTransactionStatus,
+  InvalidWagerReferenceError,
 } from '../../domain/wagering/wager-transaction';
 import { InsufficientFundsError, type Wallet } from '../../domain/wallet/wallet';
 import { sha256CanonicalJson } from '../shared/canonical-json';
@@ -40,14 +43,18 @@ export interface ProcessWagerTransactionCommand {
   readonly walletId: string;
   readonly roundId: string;
   readonly gameId: string;
-  readonly kind: WagerTransactionKind.Bet | WagerTransactionKind.Loss;
+  readonly kind: Exclude<WagerTransactionKind, WagerTransactionKind.Opening>;
   readonly money: MoneyProps;
+  readonly referenceExternalTransactionId?: string;
   readonly correlationId: string;
 }
 
 export interface ProcessWagerTransactionResult {
   readonly transactionId: string;
-  readonly status: WagerTransactionStatus.Processed | WagerTransactionStatus.Rejected;
+  readonly status:
+    | WagerTransactionStatus.Processed
+    | WagerTransactionStatus.Rejected
+    | WagerTransactionStatus.PendingReference;
   readonly balance?: Readonly<MoneyProps>;
   readonly failureCode?: FailureCode;
   readonly idempotentReplay: boolean;
@@ -73,6 +80,7 @@ export class ProcessWagerTransactionUseCase {
       gameId: command.gameId,
       kind: command.kind,
       money: money.toJSON(),
+      referenceExternalTransactionId: command.referenceExternalTransactionId,
     });
 
     try {
@@ -162,6 +170,7 @@ export class ProcessWagerTransactionUseCase {
       gameId: command.gameId,
       kind: command.kind,
       money,
+      referenceExternalTransactionId: command.referenceExternalTransactionId,
       createdAt: now,
     });
 
@@ -174,20 +183,24 @@ export class ProcessWagerTransactionUseCase {
     } else if (command.kind === WagerTransactionKind.Loss) {
       transaction.markProcessed(undefined, now, wallet.balance);
     } else {
-      try {
-        const change = wallet.debit(money, now);
-        ledgerEntry = WalletLedgerEntry.fromBalanceChange({
-          id: randomUUID(),
-          transactionId: transaction.id,
-          change,
-        });
-        transaction.markProcessed(undefined, now, wallet.balance);
-      } catch (error) {
-        if (!(error instanceof InsufficientFundsError)) {
-          throw error;
-        }
+      const reference =
+        command.referenceExternalTransactionId === undefined
+          ? undefined
+          : await context.findTransactionByExternalId(
+              command.providerId,
+              command.referenceExternalTransactionId,
+            );
 
-        transaction.reject(FailureCode.InsufficientFunds, now, wallet.balance);
+      if (command.referenceExternalTransactionId !== undefined && reference === undefined) {
+        transaction.markPendingReference(wallet.balance, new Date(now.getTime() + 1_000));
+      } else {
+        ledgerEntry = await this.processBalanceMovement(
+          context,
+          transaction,
+          reference,
+          wallet,
+          now,
+        );
       }
     }
 
@@ -209,6 +222,71 @@ export class ProcessWagerTransactionUseCase {
     return this.resultFrom(transaction, false);
   }
 
+  private async processBalanceMovement(
+    context: WageringTransactionContext,
+    transaction: WagerTransaction,
+    reference: WagerTransaction | undefined,
+    wallet: Wallet,
+    now: Date,
+  ): Promise<WalletLedgerEntry | undefined> {
+    try {
+      const direction = transaction.ledgerDirectionFor(reference);
+
+      if (
+        reference !== undefined &&
+        (transaction.kind === WagerTransactionKind.Refund ||
+          transaction.kind === WagerTransactionKind.Rollback)
+      ) {
+        const existingReversal = await context.findProcessedReversal(
+          reference.id,
+          transaction.kind,
+        );
+        if (existingReversal !== undefined) {
+          transaction.reject(
+            transaction.kind === WagerTransactionKind.Refund
+              ? FailureCode.ReferenceAlreadyRefunded
+              : FailureCode.ReferenceAlreadyRolledBack,
+            now,
+            wallet.balance,
+            reference,
+          );
+          return undefined;
+        }
+      }
+
+      const change =
+        direction === LedgerDirection.Credit
+          ? wallet.credit(transaction.money, now)
+          : wallet.debit(transaction.money, now);
+      const ledgerEntry = WalletLedgerEntry.fromBalanceChange({
+        id: randomUUID(),
+        transactionId: transaction.id,
+        change,
+      });
+      transaction.markProcessed(reference, now, wallet.balance);
+      return ledgerEntry;
+    } catch (error) {
+      if (error instanceof InvalidWagerReferenceError) {
+        transaction.reject(error.failureCode, now, wallet.balance, reference);
+        return undefined;
+      }
+
+      if (error instanceof InsufficientFundsError) {
+        transaction.reject(
+          transaction.kind === WagerTransactionKind.Rollback
+            ? FailureCode.ReversalWouldCauseNegativeBalance
+            : FailureCode.InsufficientFunds,
+          now,
+          wallet.balance,
+          reference,
+        );
+        return undefined;
+      }
+
+      throw error;
+    }
+  }
+
   private createOutboxMessages(
     transaction: WagerTransaction,
     wallet: Wallet,
@@ -222,10 +300,19 @@ export class ProcessWagerTransactionUseCase {
       causationId: transaction.id,
       occurredAt,
     };
-    const transactionEvent =
-      transaction.status === WagerTransactionStatus.Processed
-        ? WagerTransactionProcessed.from(transaction, context)
-        : WagerTransactionRejected.from(transaction, context);
+    const transactionEvent = (() => {
+      switch (transaction.status) {
+        case WagerTransactionStatus.Processed:
+          return WagerTransactionProcessed.from(transaction, context);
+        case WagerTransactionStatus.Rejected:
+          return WagerTransactionRejected.from(transaction, context);
+        case WagerTransactionStatus.PendingReference:
+          return WagerTransactionPendingReference.from(transaction, context);
+        case WagerTransactionStatus.Pending:
+        case WagerTransactionStatus.Failed:
+          throw new MissingTransactionResultError(transaction.id);
+      }
+    })();
     const messages = [OutboxMessage.enqueue(transactionEvent)];
 
     if (ledgerEntry !== undefined) {
@@ -251,7 +338,7 @@ export class ProcessWagerTransactionUseCase {
       throw new WagerIdempotencyConflictError(idempotencyKey);
     }
 
-    if (!transaction.isTerminal()) {
+    if (transaction.status === WagerTransactionStatus.Pending) {
       throw new MissingTransactionResultError(transaction.id);
     }
 
@@ -264,7 +351,8 @@ export class ProcessWagerTransactionUseCase {
   ): Readonly<ProcessWagerTransactionResult> {
     if (
       transaction.status !== WagerTransactionStatus.Processed &&
-      transaction.status !== WagerTransactionStatus.Rejected
+      transaction.status !== WagerTransactionStatus.Rejected &&
+      transaction.status !== WagerTransactionStatus.PendingReference
     ) {
       throw new MissingTransactionResultError(transaction.id);
     }
