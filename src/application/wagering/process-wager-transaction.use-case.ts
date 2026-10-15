@@ -21,6 +21,8 @@ import {
 } from '../../domain/wagering/wager-transaction';
 import { InsufficientFundsError, type Wallet } from '../../domain/wallet/wallet';
 import { sha256CanonicalJson } from '../shared/canonical-json';
+import { ReferenceRetryPolicy } from './reference-retry-policy';
+import { InboxPayloadConflictError, type InboxDelivery } from './ports/inbox-delivery';
 import {
   MissingTransactionResultError,
   WagerIdempotencyConflictError,
@@ -65,10 +67,81 @@ export class ProcessWagerTransactionUseCase {
   constructor(
     @Inject(WAGERING_UNIT_OF_WORK)
     private readonly unitOfWork: WageringUnitOfWork,
+    @Inject(ReferenceRetryPolicy)
+    private readonly referenceRetryPolicy: ReferenceRetryPolicy = new ReferenceRetryPolicy(),
   ) {}
+
+  reprocessNextPending(
+    now = new Date(),
+  ): Promise<Readonly<ProcessWagerTransactionResult> | undefined> {
+    return this.unitOfWork.executeNextPending(now, async (context, transaction, wallet) => {
+      let ledgerEntry: WalletLedgerEntry | undefined;
+      if (
+        this.referenceRetryPolicy.isExpired(
+          transaction.createdAt,
+          transaction.referenceAttempts,
+          now,
+        )
+      ) {
+        transaction.reject(FailureCode.ReferenceNotFound, now, wallet.balance);
+      } else {
+        transaction.recordReferenceAttempt();
+        const reference = await context.findTransactionByExternalId(
+          transaction.providerId,
+          transaction.referenceExternalTransactionId!,
+        );
+        if (
+          reference === undefined ||
+          reference.status === WagerTransactionStatus.PendingReference ||
+          reference.status === WagerTransactionStatus.Pending
+        ) {
+          if (
+            this.referenceRetryPolicy.isExpired(
+              transaction.createdAt,
+              transaction.referenceAttempts,
+              now,
+            )
+          ) {
+            transaction.reject(FailureCode.ReferenceNotFound, now, wallet.balance);
+          } else {
+            transaction.markPendingReference(
+              wallet.balance,
+              this.referenceRetryPolicy.nextAttemptAt(
+                transaction.createdAt,
+                transaction.referenceAttempts,
+                now,
+              ),
+            );
+          }
+        } else {
+          ledgerEntry = await this.processBalanceMovement(
+            context,
+            transaction,
+            reference,
+            wallet,
+            now,
+          );
+        }
+      }
+
+      await context.updateTransaction(transaction);
+      if (ledgerEntry !== undefined) {
+        await context.updateWallet(wallet);
+        await context.insertLedgerEntry(ledgerEntry);
+      }
+      // The pending event was already recorded when the transaction was accepted.
+      if (transaction.isTerminal()) {
+        await context.insertOutboxMessages(
+          this.createOutboxMessages(transaction, wallet, ledgerEntry, transaction.id, now),
+        );
+      }
+      return this.resultFrom(transaction, false);
+    });
+  }
 
   async execute(
     command: ProcessWagerTransactionCommand,
+    delivery?: InboxDelivery,
   ): Promise<Readonly<ProcessWagerTransactionResult>> {
     const money = Money.from(command.money);
     const payloadHash = sha256CanonicalJson({
@@ -84,10 +157,10 @@ export class ProcessWagerTransactionUseCase {
     });
 
     try {
-      return await this.executeOnce(command, money, payloadHash);
+      return await this.executeOnce(command, money, payloadHash, delivery);
     } catch (error) {
       if (error instanceof ConcurrentIdempotencyError) {
-        return this.executeOnce(command, money, payloadHash);
+        return this.executeOnce(command, money, payloadHash, delivery);
       }
 
       if (error instanceof ConcurrentExternalTransactionError) {
@@ -105,49 +178,66 @@ export class ProcessWagerTransactionUseCase {
     command: ProcessWagerTransactionCommand,
     money: Money,
     payloadHash: string,
+    delivery?: InboxDelivery,
   ): Promise<Readonly<ProcessWagerTransactionResult>> {
     return this.unitOfWork.execute(async (context) => {
-      const existing = await context.findTransactionByIdempotencyKey(command.idempotencyKey);
-      if (existing !== undefined) {
-        return this.replay(existing, payloadHash, command.idempotencyKey);
+      const inbox = delivery === undefined ? undefined : await context.receiveInbox(delivery);
+      if (inbox !== undefined && !inbox.matchesPayload(delivery!.payloadHash)) {
+        throw new InboxPayloadConflictError();
       }
-
-      const externalTransaction = await context.findTransactionByExternalId(
-        command.providerId,
-        command.externalTransactionId,
-      );
-      if (externalTransaction !== undefined) {
-        throw new ExternalTransactionAlreadyExistsError(
-          command.providerId,
-          command.externalTransactionId,
-        );
+      const result = await this.processInContext(context, command, money, payloadHash);
+      if (inbox !== undefined && !inbox.isProcessed()) {
+        inbox.markProcessed(new Date());
+        await context.completeInbox(inbox);
       }
-
-      const wallet = await context.lockWallet(command.walletId);
-      if (wallet === undefined) {
-        throw new WagerWalletNotFoundError(command.walletId);
-      }
-
-      const existingAfterLock = await context.findTransactionByIdempotencyKey(
-        command.idempotencyKey,
-      );
-      if (existingAfterLock !== undefined) {
-        return this.replay(existingAfterLock, payloadHash, command.idempotencyKey);
-      }
-
-      const externalAfterLock = await context.findTransactionByExternalId(
-        command.providerId,
-        command.externalTransactionId,
-      );
-      if (externalAfterLock !== undefined) {
-        throw new ExternalTransactionAlreadyExistsError(
-          command.providerId,
-          command.externalTransactionId,
-        );
-      }
-
-      return this.processNew(context, command, money, payloadHash, wallet);
+      return result;
     });
+  }
+
+  private async processInContext(
+    context: WageringTransactionContext,
+    command: ProcessWagerTransactionCommand,
+    money: Money,
+    payloadHash: string,
+  ): Promise<Readonly<ProcessWagerTransactionResult>> {
+    const existing = await context.findTransactionByIdempotencyKey(command.idempotencyKey);
+    if (existing !== undefined) {
+      return this.replay(existing, payloadHash, command.idempotencyKey);
+    }
+
+    const externalTransaction = await context.findTransactionByExternalId(
+      command.providerId,
+      command.externalTransactionId,
+    );
+    if (externalTransaction !== undefined) {
+      throw new ExternalTransactionAlreadyExistsError(
+        command.providerId,
+        command.externalTransactionId,
+      );
+    }
+
+    const wallet = await context.lockWallet(command.walletId);
+    if (wallet === undefined) {
+      throw new WagerWalletNotFoundError(command.walletId);
+    }
+
+    const existingAfterLock = await context.findTransactionByIdempotencyKey(command.idempotencyKey);
+    if (existingAfterLock !== undefined) {
+      return this.replay(existingAfterLock, payloadHash, command.idempotencyKey);
+    }
+
+    const externalAfterLock = await context.findTransactionByExternalId(
+      command.providerId,
+      command.externalTransactionId,
+    );
+    if (externalAfterLock !== undefined) {
+      throw new ExternalTransactionAlreadyExistsError(
+        command.providerId,
+        command.externalTransactionId,
+      );
+    }
+
+    return this.processNew(context, command, money, payloadHash, wallet);
   }
 
   private async processNew(
@@ -191,8 +281,16 @@ export class ProcessWagerTransactionUseCase {
               command.referenceExternalTransactionId,
             );
 
-      if (command.referenceExternalTransactionId !== undefined && reference === undefined) {
-        transaction.markPendingReference(wallet.balance, new Date(now.getTime() + 1_000));
+      if (
+        command.referenceExternalTransactionId !== undefined &&
+        (reference === undefined ||
+          reference.status === WagerTransactionStatus.PendingReference ||
+          reference.status === WagerTransactionStatus.Pending)
+      ) {
+        transaction.markPendingReference(
+          wallet.balance,
+          this.referenceRetryPolicy.nextAttemptAt(transaction.createdAt, 0, now),
+        );
       } else {
         ledgerEntry = await this.processBalanceMovement(
           context,

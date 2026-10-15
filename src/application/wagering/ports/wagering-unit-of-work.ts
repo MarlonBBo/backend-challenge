@@ -5,10 +5,14 @@ import type {
   WagerTransactionKind,
 } from '../../../domain/wagering/wager-transaction';
 import type { Wallet } from '../../../domain/wallet/wallet';
+import type { InboxMessage } from '../../../domain/messaging/inbox-message';
+import type { InboxDelivery } from './inbox-delivery';
 
 export const WAGERING_UNIT_OF_WORK = Symbol('WAGERING_UNIT_OF_WORK');
 
 export interface WageringTransactionContext {
+  receiveInbox(delivery: InboxDelivery): Promise<InboxMessage>;
+  completeInbox(message: InboxMessage): Promise<void>;
   findTransactionByIdempotencyKey(idempotencyKey: string): Promise<WagerTransaction | undefined>;
   findTransactionByExternalId(
     providerId: string,
@@ -20,6 +24,7 @@ export interface WageringTransactionContext {
   ): Promise<WagerTransaction | undefined>;
   lockWallet(walletId: string): Promise<Wallet | undefined>;
   insertTransaction(transaction: WagerTransaction): Promise<void>;
+  updateTransaction(transaction: WagerTransaction): Promise<void>;
   updateWallet(wallet: Wallet): Promise<void>;
   insertLedgerEntry(entry: WalletLedgerEntry): Promise<void>;
   insertOutboxMessages(messages: readonly OutboxMessage[]): Promise<void>;
@@ -27,6 +32,14 @@ export interface WageringTransactionContext {
 
 export interface WageringUnitOfWork {
   execute<T>(work: (context: WageringTransactionContext) => Promise<T>): Promise<T>;
+  executeNextPending<T>(
+    now: Date,
+    work: (
+      context: WageringTransactionContext,
+      transaction: WagerTransaction,
+      wallet: Wallet,
+    ) => Promise<T>,
+  ): Promise<T | undefined>;
 }
 
 export class ConcurrentIdempotencyError extends Error {

@@ -55,6 +55,34 @@ function create(
   return WagerTransaction.create(props(kind, overrides));
 }
 
+describe('Reference retry state', () => {
+  it('counts attempts only for pending references and protects retry timestamps', () => {
+    const transaction = create(WagerTransactionKind.Refund);
+    expect(() => transaction.recordReferenceAttempt()).toThrow(InvalidWagerTransactionError);
+    const nextAttempt = new Date(processedAt);
+    transaction.markPendingReference(brl('100.00'), nextAttempt);
+    transaction.recordReferenceAttempt();
+    nextAttempt.setTime(0);
+    expect(transaction.referenceAttempts).toBe(1);
+    expect(transaction.nextReferenceAttemptAt?.getTime()).toBe(processedAt.getTime());
+    transaction.nextReferenceAttemptAt?.setTime(0);
+    expect(transaction.nextReferenceAttemptAt?.getTime()).toBe(processedAt.getTime());
+    transaction.reject(FailureCode.ReferenceNotFound, processedAt, brl('100.00'));
+    expect(transaction.nextReferenceAttemptAt).toBeUndefined();
+    expect(() => transaction.recordReferenceAttempt()).toThrow(InvalidTransactionStateError);
+  });
+
+  it('does not mutate a terminal result when another rejection is attempted', () => {
+    const transaction = create(WagerTransactionKind.Bet);
+    transaction.markProcessed(undefined, processedAt, brl('75.00'));
+    expect(() =>
+      transaction.reject(FailureCode.ReferenceNotFound, processedAt, brl('0.00')),
+    ).toThrow(InvalidTransactionStateError);
+    expect(transaction.resultBalance?.toJSON().amount).toBe('75.00');
+    expect(transaction.status).toBe(WagerTransactionStatus.Processed);
+  });
+});
+
 function processed(
   kind: WagerTransactionKind,
   overrides: Partial<CreateWagerTransactionProps> = {},

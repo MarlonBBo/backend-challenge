@@ -19,6 +19,39 @@ const validEnvironment = {
 } as const;
 
 describe('environment configuration', () => {
+  it('validates SQS heartbeat and retry bounds', () => {
+    expect(
+      getEnvironment({ ...validEnvironment, SQS_CONSUMER_ENABLED: 'false' }).sqsConsumer.enabled,
+    ).toBe(false);
+    expect(() => getEnvironment({ ...validEnvironment, SQS_HEARTBEAT_MS: '30000' })).toThrow(
+      'Invalid environment configuration',
+    );
+    expect(() => getEnvironment({ ...validEnvironment, SQS_RETRY_BASE_SECONDS: '400' })).toThrow(
+      'Invalid environment configuration',
+    );
+  });
+  it('parses retry settings and supports disabling the worker', () => {
+    const environment = getEnvironment({
+      ...validEnvironment,
+      REFERENCE_WORKER_ENABLED: 'false',
+      REFERENCE_MAX_ATTEMPTS: '5',
+    });
+    expect(environment.references.enabled).toBe(false);
+    expect(environment.references.maxAttempts).toBe(5);
+    expect(environment.references.ttlMs).toBe(86_400_000);
+  });
+
+  it('rejects invalid retry settings', () => {
+    for (const overrides of [
+      { REFERENCE_MAX_ATTEMPTS: '0' },
+      { REFERENCE_WORKER_ENABLED: 'no' },
+      { REFERENCE_BASE_DELAY_MS: '5000', REFERENCE_MAX_DELAY_MS: '1000' },
+    ]) {
+      expect(() => getEnvironment({ ...validEnvironment, ...overrides })).toThrow(
+        'Invalid environment configuration',
+      );
+    }
+  });
   it('parses and groups valid environment values', () => {
     const environment = getEnvironment(validEnvironment);
 
