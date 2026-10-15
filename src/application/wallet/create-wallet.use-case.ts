@@ -63,7 +63,7 @@ export class CreateWalletUseCase {
       money: initialBalance,
       createdAt: now,
     });
-    openingTransaction.markProcessed(undefined, now);
+    openingTransaction.markProcessed(undefined, now, wallet.balance);
 
     const openingLedgerEntry = WalletLedgerEntry.create({
       id: randomUUID(),

@@ -48,6 +48,7 @@ export interface WagerTransactionState extends CreateWagerTransactionProps {
   readonly status: WagerTransactionStatus;
   readonly referenceTransactionId?: string;
   readonly failureCode?: FailureCode;
+  readonly resultBalance?: Money;
   readonly processedAt?: Date;
 }
 
@@ -106,6 +107,7 @@ export class WagerTransaction {
     private _status: WagerTransactionStatus,
     private _referenceTransactionId?: string,
     private _failureCode?: FailureCode,
+    private _resultBalance?: Money,
     private _processedAt?: Date,
   ) {}
 
@@ -169,13 +171,19 @@ export class WagerTransaction {
     return this._processedAt === undefined ? undefined : new Date(this._processedAt);
   }
 
-  markProcessed(reference: WagerTransaction | undefined, at: Date): void {
+  get resultBalance(): Money | undefined {
+    return this._resultBalance;
+  }
+
+  markProcessed(reference: WagerTransaction | undefined, at: Date, resultBalance?: Money): void {
     this.assertNotTerminal();
     WagerTransaction.assertValidTimestamp(at);
     this.assertReferenceForProcessing(reference);
+    this.assertResultBalance(resultBalance);
 
     this._referenceTransactionId = reference?.id;
     this._status = WagerTransactionStatus.Processed;
+    this._resultBalance = resultBalance;
     this._processedAt = new Date(at);
   }
 
@@ -191,7 +199,9 @@ export class WagerTransaction {
     this._status = WagerTransactionStatus.PendingReference;
   }
 
-  reject(code: FailureCode, at: Date): void {
+  reject(code: FailureCode, at: Date, resultBalance?: Money): void {
+    this.assertResultBalance(resultBalance);
+    this._resultBalance = resultBalance;
     this.moveToFailedState(WagerTransactionStatus.Rejected, code, at);
   }
 
@@ -266,6 +276,7 @@ export class WagerTransaction {
       state.status,
       state.referenceTransactionId,
       state.failureCode,
+      state.resultBalance,
       state.processedAt === undefined ? undefined : new Date(state.processedAt),
     );
   }
@@ -317,6 +328,18 @@ export class WagerTransaction {
   private assertNotTerminal(): void {
     if (this.isTerminal()) {
       throw new InvalidTransactionStateError(this._status);
+    }
+  }
+
+  private assertResultBalance(resultBalance: Money | undefined): void {
+    if (resultBalance === undefined) {
+      return;
+    }
+
+    if (resultBalance.currency !== this.money.currency || resultBalance.isNegative()) {
+      throw new InvalidWagerTransactionError(
+        'Result balance must be non-negative and use the transaction currency',
+      );
     }
   }
 
