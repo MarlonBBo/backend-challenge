@@ -5,6 +5,7 @@ import { AppController } from './presentation/http/app.controller';
 import { validateEnvironment } from './config/environment';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { WalletModule } from './application/wallet/wallet.module';
+import { WageringModule } from './application/wagering/wagering.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { WalletModule } from './application/wallet/wallet.module';
     }),
     DatabaseModule,
     WalletModule,
+    WageringModule,
   ],
   controllers: [AppController],
 })

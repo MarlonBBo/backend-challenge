@@ -21,6 +21,9 @@ export class WagerTransactionMapper {
     entity.referenceExternalTransactionId = transaction.referenceExternalTransactionId ?? null;
     entity.referenceTransactionId = transaction.referenceTransactionId ?? null;
     entity.failureCode = transaction.failureCode ?? null;
+    entity.resultBalance = transaction.resultBalance?.toJSON().amount ?? null;
+    entity.referenceAttempts = transaction.referenceAttempts;
+    entity.nextReferenceAttemptAt = transaction.nextReferenceAttemptAt ?? null;
     entity.createdAt = transaction.createdAt;
     entity.processedAt = transaction.processedAt ?? null;
     return entity;
@@ -44,6 +47,12 @@ export class WagerTransactionMapper {
       status: entity.status,
       referenceTransactionId: entity.referenceTransactionId ?? undefined,
       failureCode: entity.failureCode ?? undefined,
+      resultBalance:
+        entity.resultBalance === null
+          ? undefined
+          : Money.from({ amount: entity.resultBalance, currency: entity.currency }),
+      referenceAttempts: entity.referenceAttempts,
+      nextReferenceAttemptAt: entity.nextReferenceAttemptAt ?? undefined,
       processedAt: entity.processedAt ?? undefined,
     });
   }

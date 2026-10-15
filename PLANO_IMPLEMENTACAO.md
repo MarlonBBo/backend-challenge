@@ -329,11 +329,11 @@ Falhas de negócio são terminais e auditáveis. Falhas transitórias de infraes
 - [x] Implementar criação da wallet.
 - [x] Criar transação interna `OPENING` quando necessário.
 - [x] Criar ledger de abertura no mesmo commit.
-- [ ] Implementar o caso de uso central de apostas.
-- [ ] Implementar lock pessimista por wallet.
-- [ ] Implementar hash canônico e idempotência.
-- [ ] Implementar BET e LOSS primeiro; depois WIN, REFUND e ROLLBACK.
-- [ ] Gravar outbox no mesmo commit.
+- [x] Implementar o caso de uso central de apostas.
+- [x] Implementar lock pessimista por wallet.
+- [x] Implementar hash canônico e idempotência.
+- [x] Implementar BET e LOSS primeiro; depois WIN, REFUND e ROLLBACK.
+- [x] Gravar outbox no mesmo commit.
 - [ ] Expor os endpoints essenciais.
 
 ### Testes de saída do Dia 1
@@ -341,10 +341,10 @@ Falhas de negócio são terminais e auditáveis. Falhas transitórias de infraes
 - [x] `Money` rejeita formatos inválidos e conflitos de moeda.
 - [x] Wallet duplicada é impedida pelo banco.
 - [x] Abertura cria saldo, transação e ledger atomicamente.
-- [ ] Uma aposta processada altera wallet e ledger.
-- [ ] Uma aposta rejeitada não cria ledger.
-- [ ] Duas apostas simultâneas de `80.00` sobre `100.00` resultam em uma processada e uma rejeitada.
-- [ ] O saldo final é `20.00` e existe apenas um débito.
+- [x] Uma aposta processada altera wallet e ledger.
+- [x] Uma aposta rejeitada não cria ledger.
+- [x] Duas apostas simultâneas de `80.00` sobre `100.00` resultam em uma processada e uma rejeitada.
+- [x] O saldo final é `20.00` e existe apenas um débito.
 
 ### Critério de conclusão do Dia 1
 
@@ -374,12 +374,12 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 
 ### Bloco 3: referências fora de ordem
 
-- [ ] Persistir `PENDING_REFERENCE`.
-- [ ] Emitir `WagerTransactionPendingReference`.
+- [x] Persistir `PENDING_REFERENCE`.
+- [x] Emitir `WagerTransactionPendingReference`.
 - [ ] Implementar worker de reprocessamento.
 - [ ] Aplicar backoff e limite de tentativas/TTL.
 - [ ] Rejeitar com `REFERENCE_NOT_FOUND` ao esgotar o limite.
-- [ ] Impedir REFUND e ROLLBACK duplicados.
+- [x] Impedir REFUND e ROLLBACK duplicados.
 
 ### Bloco 4: consultas e operação
 
