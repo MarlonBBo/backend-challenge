@@ -19,6 +19,18 @@ const validEnvironment = {
 } as const;
 
 describe('environment configuration', () => {
+  it('validates outbox settings and supports disabling the publisher', () => {
+    expect(getEnvironment(validEnvironment).outbox.batchSize).toBe(25);
+    expect(
+      getEnvironment({ ...validEnvironment, OUTBOX_WORKER_ENABLED: 'false' }).outbox.enabled,
+    ).toBe(false);
+    expect(() => getEnvironment({ ...validEnvironment, OUTBOX_WORKER_BATCH_SIZE: '101' })).toThrow(
+      'Invalid environment configuration',
+    );
+    expect(() => getEnvironment({ ...validEnvironment, OUTBOX_WORKER_INTERVAL_MS: '0' })).toThrow(
+      'Invalid environment configuration',
+    );
+  });
   it('validates SQS heartbeat and retry bounds', () => {
     expect(
       getEnvironment({ ...validEnvironment, SQS_CONSUMER_ENABLED: 'false' }).sqsConsumer.enabled,

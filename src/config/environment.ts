@@ -14,6 +14,9 @@ const environmentSchema = z.object({
   SQS_WAGER_QUEUE_URL: z.url(),
   SQS_WAGER_DLQ_URL: z.url(),
   SQS_EVENTS_QUEUE_URL: z.url(),
+  OUTBOX_WORKER_ENABLED: z.enum(['true', 'false']).default('true'),
+  OUTBOX_WORKER_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
+  OUTBOX_WORKER_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(25),
   SQS_CONSUMER_ENABLED: z.enum(['true', 'false']).default('true'),
   SQS_VISIBILITY_SECONDS: z.coerce.number().int().min(3).max(43_200).default(30),
   SQS_HEARTBEAT_MS: z.coerce.number().int().min(100).default(10_000),
@@ -32,6 +35,7 @@ export type Environment = Readonly<{
   nodeEnv: z.infer<typeof environmentSchema>['NODE_ENV'];
   port: number;
   logLevel: z.infer<typeof environmentSchema>['LOG_LEVEL'];
+  outbox: Readonly<{ enabled: boolean; intervalMs: number; batchSize: number }>;
   sqsConsumer: Readonly<{
     enabled: boolean;
     visibilitySeconds: number;
@@ -102,6 +106,11 @@ export function getEnvironment(values: NodeJS.ProcessEnv | Record<string, unknow
     nodeEnv: result.data.NODE_ENV,
     port: result.data.PORT,
     logLevel: result.data.LOG_LEVEL,
+    outbox: Object.freeze({
+      enabled: result.data.OUTBOX_WORKER_ENABLED === 'true',
+      intervalMs: result.data.OUTBOX_WORKER_INTERVAL_MS,
+      batchSize: result.data.OUTBOX_WORKER_BATCH_SIZE,
+    }),
     sqsConsumer: Object.freeze({
       enabled: result.data.SQS_CONSUMER_ENABLED === 'true',
       visibilitySeconds: result.data.SQS_VISIBILITY_SECONDS,

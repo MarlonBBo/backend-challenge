@@ -369,12 +369,12 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 
 ### Bloco 2: outbox
 
-- [ ] Implementar busca em lote com `SKIP LOCKED`.
-- [ ] Implementar publicação com `eventId` estável.
-- [ ] Marcar publicação concluída.
-- [ ] Reagendar falhas com backoff.
-- [ ] Permitir publishers concorrentes.
-- [ ] Medir tentativas e atraso da outbox.
+- [x] Implementar busca em lote com `SKIP LOCKED`.
+- [x] Implementar publicação com `eventId` estável.
+- [x] Marcar publicação concluída.
+- [x] Reagendar falhas com backoff.
+- [x] Permitir publishers concorrentes.
+- [x] Medir tentativas e atraso da outbox.
 
 ### Bloco 3: referências fora de ordem
 
@@ -399,7 +399,7 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 - [x] Redelivery da mesma mensagem não duplica efeitos.
 - [x] Falha antes do commit permite retry seguro.
 - [x] Falha depois do commit e antes do ack permite redelivery seguro.
-- [ ] Dois publishers não perdem eventos.
+- [x] Dois publishers não perdem eventos.
 - [x] REFUND/ROLLBACK anterior à referência é processado posteriormente.
 - [x] Mensagem permanentemente inválida chega à DLQ.
 
@@ -416,7 +416,7 @@ Entradas HTTP e SQS compartilham as mesmas regras, e reinícios ou redeliveries 
 - [ ] Demonstrar paralelismo entre wallets distintas.
 - [ ] Executar com pelo menos três processos/instâncias.
 - [ ] Simular worker morto após commit e antes do ack.
-- [ ] Executar dois publishers sobre a mesma outbox.
+- [x] Executar dois publishers sobre a mesma outbox.
 - [x] Testar referência entregue fora de ordem.
 - [ ] Reiniciar os serviços e comprovar a consistência final.
 - [ ] Verificar `wallet.balance == saldo reconstruído pelo ledger` em todos os testes relevantes.

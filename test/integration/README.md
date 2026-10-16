@@ -24,3 +24,5 @@ O nome do banco precisa terminar em `_test`. Sem `TEST_DATABASE_URL`, os testes 
 Com `TEST_SQS_ENDPOINT`, também são executados os testes do consumidor contra LocalStack real (inicie-o com `docker compose up -d localstack`). Eles criam filas FIFO exclusivas e as removem ao final. Cobrem redelivery após commit sem ack, rollback da inbox antes do commit, concorrência pela mesma mensagem, consumo automático e DLQ. Sem essa variável, apenas os cenários SQS são ignorados. Use o IP da WSL também no endpoint quando necessário.
 
 O banco deve ser exclusivo desta suíte, sem uma aplicação/worker externo consumindo suas pendências. Execute uma suíte por vez. Se uma execução for interrompida e deixar pendências, use um novo banco com sufixo `_test` para uma execução isolada.
+
+Os testes do publicador usam outro banco, definido por `TEST_OUTBOX_DATABASE_URL`, além de `TEST_SQS_ENDPOINT`. Isso isola a seleção de eventos dos registros gerados pela suíte de referências. O setup e os cenários estão em [docs/OUTBOX.md](../../docs/OUTBOX.md).
