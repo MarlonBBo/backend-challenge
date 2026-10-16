@@ -7,6 +7,9 @@ import {
   Controller,
   Headers,
   Post,
+  Get,
+  Param,
+  Inject,
 } from '@nestjs/common';
 import { z } from 'zod';
 
@@ -15,6 +18,8 @@ import {
   type CreateWalletResult,
 } from '../../application/wallet/create-wallet.use-case';
 import { WalletAlreadyExistsError } from '../../application/wallet/ports/create-wallet-unit-of-work';
+import { GetWalletUseCase } from '../../application/wallet/get-wallet.use-case';
+import { queryIdentifier, queryResponse } from './query-response';
 
 const createWalletSchema = z.object({
   playerId: z.uuid(),
@@ -26,7 +31,16 @@ const createWalletSchema = z.object({
 
 @Controller('wallets')
 export class WalletController {
-  constructor(private readonly createWallet: CreateWalletUseCase) {}
+  constructor(
+    @Inject(CreateWalletUseCase) private readonly createWallet: CreateWalletUseCase,
+    @Inject(GetWalletUseCase) private readonly getWallet: GetWalletUseCase,
+  ) {}
+
+  @Get(':walletId')
+  get(@Param('walletId') walletId: string) {
+    const id = queryIdentifier(walletId, 'walletId', true);
+    return queryResponse(() => this.getWallet.execute(id));
+  }
 
   @Post()
   async create(

@@ -13,6 +13,11 @@ export class ConcurrentWalletUpdateError extends Error {
 }
 
 export class WalletRepository {
+  async findById(entityManager: EntityManager, id: string): Promise<Wallet | undefined> {
+    const entity = await entityManager.findOne(WalletEntity, { id });
+    return entity === null ? undefined : WalletMapper.toDomain(entity);
+  }
+
   async insert(entityManager: EntityManager, wallet: Wallet): Promise<void> {
     await entityManager.persist(WalletMapper.toEntity(wallet)).flush();
   }

@@ -15,11 +15,17 @@ import { SQSClient } from '@aws-sdk/client-sqs';
 import { SqsWagerConsumer } from '../../infrastructure/workers/sqs-wager.consumer';
 import { SqsWagerQueue } from '../../infrastructure/messaging/sqs-wager.queue';
 import { WAGER_QUEUE, SQS_CONSUMER_OPTIONS } from '../../infrastructure/messaging/wager-queue';
+import { GetWagerTransactionUseCase } from './get-wager-transaction.use-case';
+import { WAGER_TRANSACTION_READER } from './ports/wager-transaction-reader';
+import { MikroOrmWagerTransactionReader } from '../../infrastructure/database/queries/mikro-orm-wager-transaction.reader';
+import { ProviderWageringController } from '../../presentation/http/provider-wagering.controller';
 
 @Module({
-  controllers: [WageringController],
+  controllers: [WageringController, ProviderWageringController],
   providers: [
     ProcessWagerTransactionUseCase,
+    GetWagerTransactionUseCase,
+    { provide: WAGER_TRANSACTION_READER, useClass: MikroOrmWagerTransactionReader },
     PendingReferenceWorker,
     SqsWagerConsumer,
     { provide: SQS_CONSUMER_OPTIONS, useFactory: () => getEnvironment(process.env).sqsConsumer },

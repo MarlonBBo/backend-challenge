@@ -9,6 +9,11 @@ import { WagerTransactionEntity } from '../entities/wager-transaction.entity';
 import { WagerTransactionMapper } from '../mappers/wager-transaction.mapper';
 
 export class WagerTransactionRepository {
+  async findById(entityManager: EntityManager, id: string): Promise<WagerTransaction | undefined> {
+    const entity = await entityManager.findOne(WagerTransactionEntity, { id });
+    return entity === null ? undefined : WagerTransactionMapper.toDomain(entity);
+  }
+
   async findNextPendingForUpdate(
     entityManager: EntityManager,
     now: Date,

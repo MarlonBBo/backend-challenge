@@ -6,6 +6,7 @@ import { validateEnvironment } from './config/environment';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { WalletModule } from './application/wallet/wallet.module';
 import { WageringModule } from './application/wagering/wagering.module';
+import { OutboxModule } from './application/messaging/outbox.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { WageringModule } from './application/wagering/wagering.module';
     DatabaseModule,
     WalletModule,
     WageringModule,
+    OutboxModule,
   ],
   controllers: [AppController],
 })
