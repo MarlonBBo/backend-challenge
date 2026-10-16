@@ -57,6 +57,13 @@ class InMemoryWageringUnitOfWork implements WageringUnitOfWork {
 
   execute<T>(work: (context: WageringTransactionContext) => Promise<T>): Promise<T> {
     return work({
+      findCorrelationId: (id) => {
+        const value = this.outboxMessages.find(
+          (message) =>
+            message.aggregateId === id && message.eventType === 'WagerTransactionPendingReference',
+        )?.payload.correlationId;
+        return Promise.resolve(typeof value === 'string' ? value : undefined);
+      },
       receiveInbox: (delivery) => {
         let message = this.inbox.find(
           (entry) =>
@@ -140,6 +147,31 @@ function command(
 }
 
 describe('ProcessWagerTransactionUseCase', () => {
+  test('replays when another process commits between the key and external identity reads', async () => {
+    const memory = new InMemoryWageringUnitOfWork(openWallet());
+    await new ProcessWagerTransactionUseCase(memory).execute(command());
+    const racing: WageringUnitOfWork = {
+      executeNextPending: (now, work) => memory.executeNextPending(now, work),
+      execute: (work) =>
+        memory.execute((context) =>
+          work({
+            ...context,
+            findTransactionByIdempotencyKey: () => Promise.resolve(undefined),
+          }),
+        ),
+    };
+    const replay = await new ProcessWagerTransactionUseCase(racing).execute(command());
+    expect(replay.idempotentReplay).toBe(true);
+    expect(replay.balance?.amount).toBe('75.00');
+    expect(memory.ledgerEntries).toHaveLength(1);
+    expect(
+      new ProcessWagerTransactionUseCase(racing).execute(
+        command({
+          money: { amount: '26.00', currency: 'BRL' },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(WagerIdempotencyConflictError);
+  });
   test('records a processed inbox and replays redelivery without financial effects', async () => {
     const unitOfWork = new InMemoryWageringUnitOfWork(openWallet());
     const useCase = new ProcessWagerTransactionUseCase(unitOfWork);

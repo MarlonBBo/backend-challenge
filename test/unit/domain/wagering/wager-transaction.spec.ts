@@ -342,6 +342,17 @@ describe('WagerTransaction', () => {
       expect(() => refund.ledgerDirectionFor(reference)).toThrow(InvalidWagerReferenceError);
     });
 
+    it('allows a WIN amount different from its referenced BET', () => {
+      const reference = processed(WagerTransactionKind.Bet);
+      const win = create(WagerTransactionKind.Win, {
+        referenceExternalTransactionId: reference.externalTransactionId,
+        money: brl('100.00'),
+      });
+      expect(win.ledgerDirectionFor(reference)).toBe(LedgerDirection.Credit);
+      win.markProcessed(reference, processedAt);
+      expect(win.status).toBe(WagerTransactionStatus.Processed);
+    });
+
     it('rejects a different reference amount', () => {
       const reference = processed(WagerTransactionKind.Bet, {
         externalTransactionId: 'bet-external-id',

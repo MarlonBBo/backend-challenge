@@ -1,5 +1,10 @@
 import { UniqueConstraintViolationException } from '@mikro-orm/core';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import {
+  APPLICATION_TELEMETRY,
+  NOOP_TELEMETRY,
+  type ApplicationTelemetry,
+} from '../../../application/shared/telemetry';
 import { EntityManager } from '@mikro-orm/postgresql';
 
 import {
@@ -18,13 +23,20 @@ import { InboxMessageRepository } from '../repositories/inbox-message.repository
 
 @Injectable()
 export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
-  private readonly wallets = new WalletRepository();
+  private readonly wallets: WalletRepository;
   private readonly transactions = new WagerTransactionRepository();
   private readonly ledger = new WalletLedgerEntryRepository();
   private readonly outbox = new OutboxMessageRepository();
   private readonly inbox = new InboxMessageRepository();
 
-  constructor(private readonly entityManager: EntityManager) {}
+  constructor(
+    @Inject(EntityManager) private readonly entityManager: EntityManager,
+    @Optional()
+    @Inject(APPLICATION_TELEMETRY)
+    private readonly telemetry: ApplicationTelemetry = NOOP_TELEMETRY,
+  ) {
+    this.wallets = new WalletRepository(telemetry);
+  }
 
   async execute<T>(work: (context: WageringTransactionContext) => Promise<T>): Promise<T> {
     try {
@@ -34,6 +46,13 @@ export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
           work(this.context(transactionalEntityManager)),
         );
     } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        ['40P01', '55P03', '40001'].includes(String(error.code))
+      )
+        this.telemetry.increment('wallet_lock_conflicts_total');
       if (error instanceof UniqueConstraintViolationException) {
         if (error.message.includes('wager_transactions_idempotency_key_unique')) {
           throw new ConcurrentIdempotencyError();
@@ -71,6 +90,7 @@ export class MikroOrmWageringUnitOfWork implements WageringUnitOfWork {
 
   private context(transactionalEntityManager: EntityManager): WageringTransactionContext {
     return {
+      findCorrelationId: (id) => this.outbox.findCorrelationId(transactionalEntityManager, id),
       receiveInbox: (delivery) => this.inbox.receive(transactionalEntityManager, delivery),
       completeInbox: (message) => this.inbox.complete(transactionalEntityManager, message),
       findTransactionByIdempotencyKey: (idempotencyKey) =>

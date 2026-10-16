@@ -11,6 +11,7 @@ import type { InboxDelivery } from './inbox-delivery';
 export const WAGERING_UNIT_OF_WORK = Symbol('WAGERING_UNIT_OF_WORK');
 
 export interface WageringTransactionContext {
+  findCorrelationId(transactionId: string): Promise<string | undefined>;
   receiveInbox(delivery: InboxDelivery): Promise<InboxMessage>;
   completeInbox(message: InboxMessage): Promise<void>;
   findTransactionByIdempotencyKey(idempotencyKey: string): Promise<WagerTransaction | undefined>;

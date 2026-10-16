@@ -417,7 +417,7 @@ export class WagerTransaction {
     this.assertReferenceContext(reference);
     this.assertReferenceKind(reference);
 
-    if (!this.money.equals(reference.money)) {
+    if (this.requiresReference() && !this.money.equals(reference.money)) {
       throw new InvalidWagerReferenceError(
         FailureCode.ReferenceAmountMismatch,
         'The transaction amount must equal the referenced transaction amount',

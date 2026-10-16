@@ -7,6 +7,16 @@ import { OutboxMessageEntity } from '../entities/outbox-message.entity';
 import type { OutboxPendingMetrics } from '../../../application/messaging/ports/outbox-unit-of-work';
 
 export class OutboxMessageRepository {
+  async findCorrelationId(
+    entityManager: EntityManager,
+    transactionId: string,
+  ): Promise<string | undefined> {
+    const row = await entityManager.findOne(OutboxMessageEntity, {
+      aggregateId: transactionId,
+      eventType: 'WagerTransactionPendingReference',
+    });
+    return typeof row?.payload.correlationId === 'string' ? row.payload.correlationId : undefined;
+  }
   async findDueForUpdate(
     entityManager: EntityManager,
     now: Date,

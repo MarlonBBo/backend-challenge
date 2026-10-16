@@ -35,5 +35,5 @@ export default defineConfig({
     max: environment.database.poolMax,
   },
   allowGlobalContext: false,
-  debug: environment.nodeEnv === 'development',
+  debug: false,
 });

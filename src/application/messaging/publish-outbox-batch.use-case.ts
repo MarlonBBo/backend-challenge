@@ -54,7 +54,7 @@ export class PublishOutboxBatchUseCase {
           message.markPublished(new Date());
           published += 1;
         }
-        // Uma falha no banco de dados deve resultar em uma 
+        // Uma falha no banco de dados deve resultar em uma
         // reversão (rollback), e não em uma nova tentativa de publicação, nesta transação.
         await context.save(message);
         events.push({
