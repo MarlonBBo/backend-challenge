@@ -2,6 +2,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  Optional,
   type OnApplicationBootstrap,
   type BeforeApplicationShutdown,
 } from '@nestjs/common';
@@ -10,6 +11,11 @@ import { WagerIdempotencyConflictError } from '../../application/wagering/proces
 import { ExternalTransactionAlreadyExistsError } from '../../application/wagering/ports/wagering-unit-of-work';
 import { InboxPayloadConflictError } from '../../application/wagering/ports/inbox-delivery';
 import { sha256CanonicalJson } from '../../application/shared/canonical-json';
+import {
+  APPLICATION_TELEMETRY,
+  NOOP_TELEMETRY,
+  type ApplicationTelemetry,
+} from '../../application/shared/telemetry';
 import { InvalidWagerMessageError, parseWagerRequest } from '../messaging/wager-request';
 import {
   WAGER_QUEUE,
@@ -32,6 +38,9 @@ export class SqsWagerConsumer implements OnApplicationBootstrap, BeforeApplicati
     @Inject(ProcessWagerTransactionUseCase)
     private readonly processor: Pick<ProcessWagerTransactionUseCase, 'execute'>,
     @Inject(SQS_CONSUMER_OPTIONS) private readonly options: SqsConsumerOptions,
+    @Optional()
+    @Inject(APPLICATION_TELEMETRY)
+    private readonly telemetry: ApplicationTelemetry = NOOP_TELEMETRY,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -76,7 +85,7 @@ export class SqsWagerConsumer implements OnApplicationBootstrap, BeforeApplicati
         },
       );
       await stopHeartbeat();
-      // A execução só é concluída após a confirmação (commit) 
+      // A execução só é concluída após a confirmação (commit)
       // da Unidade de Trabalho (Unit of Work), incluindo a caixa de entrada (inbox).
       await this.queue.acknowledge(message.receiptHandle);
       this.logger.log({
@@ -99,6 +108,7 @@ export class SqsWagerConsumer implements OnApplicationBootstrap, BeforeApplicati
       if (permanent) {
         // Não exclua a origem, a menos que o envio para a DLQ tenha sido bem-sucedido.
         await this.queue.deadLetter(message, error.code);
+        this.telemetry.increment('sqs_dlq_forwards_total', { reason: error.code });
         await this.queue.acknowledge(message.receiptHandle);
         this.logger.warn({
           message: 'Permanent wagering message sent to DLQ',
@@ -106,6 +116,7 @@ export class SqsWagerConsumer implements OnApplicationBootstrap, BeforeApplicati
           code: error.code,
         });
       } else {
+        this.telemetry.increment('wager_retries_total', { worker: 'sqs' });
         const delay = Math.min(
           this.options.retryBaseSeconds * 2 ** Math.min(message.receiveCount - 1, 20),
           this.options.retryMaxSeconds,

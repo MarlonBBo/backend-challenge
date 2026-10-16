@@ -34,7 +34,7 @@ OUTBOX_WORKER_BATCH_SIZE=25
 
 Os valores são validados por ambiente e repassados pelo Compose. `OUTBOX_WORKER_ENABLED=false` permite executar somente a API e os demais workers.
 
-O worker mantém contadores em memória de tentativas, sucessos e falhas de envio de lotes confirmados, além de falhas de lote. A propriedade `metrics` devolve uma cópia desses contadores. As medições `pending` e `oldestPendingAgeMs` consultam todas as pendências no banco, incluindo eventos aguardando backoff. Lotes com trabalho ou pendências registram essas medições e, por evento tentado, `eventId`, falhas acumuladas e atraso desde `occurredAt`. Contadores em memória reiniciam com o processo e não incluem envios de transações revertidas; o histórico de falhas persistidas permanece no banco. A exposição geral de métricas por endpoint continua na etapa de observabilidade.
+O worker mantém contadores em memória de tentativas, sucessos e falhas de envio de lotes confirmados, além de falhas de lote. A propriedade `metrics` devolve uma cópia desses contadores. As medições `pending` e `oldestPendingAgeMs` consultam todas as pendências no banco, incluindo eventos aguardando backoff. Lotes com trabalho ou pendências registram essas medições e, por evento tentado, `eventId`, falhas acumuladas e atraso desde `occurredAt`. Contadores em memória reiniciam com o processo e não incluem envios de transações revertidas; o histórico de falhas persistidas permanece no banco. O endpoint `GET /metrics` expõe, entre outras séries, `outbox_published_total`, `outbox_pending_messages`, `outbox_lag_seconds` e retries por worker. Não há agregação entre processos ou dashboard configurado.
 
 ## Testes reais
 
@@ -43,6 +43,16 @@ Crie um banco exclusivo para o publicador. Ele não pode compartilhar pendência
 ```sh
 docker compose exec postgres psql -U wagering -d postgres -c 'CREATE DATABASE wagering_outbox_test;'
 ```
+
+Configuração em Bash (Linux/macOS/WSL):
+
+```bash
+export TEST_OUTBOX_DATABASE_URL='postgresql://wagering:wagering@localhost:5432/wagering_outbox_test'
+export TEST_SQS_ENDPOINT='http://localhost:4566'
+bun run test:integration
+```
+
+Configuração em PowerShell:
 
 ```powershell
 $env:TEST_OUTBOX_DATABASE_URL = 'postgresql://wagering:wagering@localhost:5432/wagering_outbox_test'

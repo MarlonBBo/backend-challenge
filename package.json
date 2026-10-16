@@ -21,6 +21,7 @@
     "test": "bun test",
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",
+    "test:distributed": "bun run build && bun test test/distributed",
     "db:migration:create": "mikro-orm migration:create",
     "db:migration:up": "mikro-orm migration:up",
     "db:migration:down": "mikro-orm migration:down",

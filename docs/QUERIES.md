@@ -1,5 +1,7 @@
 # Consultas de carteira e transações
 
+O histórico paginado de movimentações está documentado em [LEDGER.md](LEDGER.md).
+
 Todas as rotas usam o prefixo `/api`, retornam JSON e consultam o estado confirmado no PostgreSQL. Não alteram saldo, versão, transações, ledger, inbox ou outbox. Cada leitura usa um novo `EntityManager.fork()`, sem lock pessimista e sem reutilizar entidades de consultas anteriores.
 
 ## Carteira
@@ -44,14 +46,24 @@ O identificador interno deve ser UUID. Os identificadores de provedor e transaç
 
 ## Respostas HTTP
 
-| Situação | Status e código |
-| --- | --- |
-| Carteira ou transação encontrada, inclusive rejeitada ou pendente | `200` |
-| Parâmetro de rota inválido | `400 INVALID_PATH_PARAMETER` |
-| Carteira inexistente | `404 WALLET_NOT_FOUND` |
-| Transação inexistente no ID ou provedor informado | `404 TRANSACTION_NOT_FOUND` |
+| Situação                                                          | Status e código              |
+| ----------------------------------------------------------------- | ---------------------------- |
+| Carteira ou transação encontrada, inclusive rejeitada ou pendente | `200`                        |
+| Parâmetro de rota inválido                                        | `400 INVALID_PATH_PARAMETER` |
+| Carteira inexistente                                              | `404 WALLET_NOT_FOUND`       |
+| Transação inexistente no ID ou provedor informado                 | `404 TRANSACTION_NOT_FOUND`  |
 
 Falhas de infraestrutura não são convertidas em recurso inexistente. Consultas são leituras pontuais; chamadas separadas de carteira e transação podem observar commits diferentes quando houver processamento concorrente.
+
+Exemplos com curl (Bash — Linux/macOS/WSL):
+
+```bash
+curl --fail --show-error 'http://localhost:3000/api/wallets/0192f291-27dd-7d3f-8071-5f8685deef37'
+curl --fail --show-error 'http://localhost:3000/api/wagering/transactions/0192f298-345e-7e38-af88-e43f851a819d'
+curl --fail --show-error 'http://localhost:3000/api/providers/provider-a/wagering/transactions/transaction-123'
+```
+
+Os identificadores são ilustrativos; substitua pelos dados criados na [demonstração manual](DEMONSTRACAO.md).
 
 Exemplos no PowerShell:
 

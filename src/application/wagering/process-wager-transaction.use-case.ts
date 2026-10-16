@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import {
+  APPLICATION_TELEMETRY,
+  NOOP_TELEMETRY,
+  type ApplicationTelemetry,
+} from '../shared/telemetry';
 
 import { WalletBalanceChanged } from '../../domain/events/wallet-events';
 import {
@@ -69,12 +74,17 @@ export class ProcessWagerTransactionUseCase {
     private readonly unitOfWork: WageringUnitOfWork,
     @Inject(ReferenceRetryPolicy)
     private readonly referenceRetryPolicy: ReferenceRetryPolicy = new ReferenceRetryPolicy(),
+    @Optional()
+    @Inject(APPLICATION_TELEMETRY)
+    private readonly telemetry: ApplicationTelemetry = NOOP_TELEMETRY,
   ) {}
 
   reprocessNextPending(
     now = new Date(),
   ): Promise<Readonly<ProcessWagerTransactionResult> | undefined> {
     return this.unitOfWork.executeNextPending(now, async (context, transaction, wallet) => {
+      const correlationId = (await context.findCorrelationId(transaction.id)) ?? transaction.id;
+      this.telemetry.increment('wager_retries_total', { worker: 'reference' });
       let ledgerEntry: WalletLedgerEntry | undefined;
       if (
         this.referenceRetryPolicy.isExpired(
@@ -132,7 +142,7 @@ export class ProcessWagerTransactionUseCase {
       // The pending event was already recorded when the transaction was accepted.
       if (transaction.isTerminal()) {
         await context.insertOutboxMessages(
-          this.createOutboxMessages(transaction, wallet, ledgerEntry, transaction.id, now),
+          this.createOutboxMessages(transaction, wallet, ledgerEntry, correlationId, now),
         );
       }
       return this.resultFrom(transaction, false);
@@ -140,6 +150,49 @@ export class ProcessWagerTransactionUseCase {
   }
 
   async execute(
+    command: ProcessWagerTransactionCommand,
+    delivery?: InboxDelivery,
+  ): Promise<Readonly<ProcessWagerTransactionResult>> {
+    const started = performance.now();
+    return this.telemetry.run(
+      {
+        correlationId: command.correlationId,
+        messageId: delivery?.messageId,
+        walletId: command.walletId,
+        providerId: command.providerId,
+      },
+      async () => {
+        try {
+          const result = await this.executeCommand(command, delivery);
+          if (result.idempotentReplay)
+            this.telemetry.increment('wager_duplicates_total', {
+              source: delivery === undefined ? 'http' : 'sqs',
+            });
+          else
+            this.telemetry.increment('wager_transactions_total', {
+              status: result.status,
+              kind: command.kind,
+            });
+          return result;
+        } catch (error) {
+          if (
+            error instanceof WagerIdempotencyConflictError ||
+            error instanceof ExternalTransactionAlreadyExistsError
+          ) {
+            this.telemetry.increment('wager_idempotency_conflicts_total');
+          }
+          throw error;
+        } finally {
+          this.telemetry.observe(
+            'wager_processing_duration_seconds',
+            (performance.now() - started) / 1000,
+          );
+        }
+      },
+    );
+  }
+
+  private async executeCommand(
     command: ProcessWagerTransactionCommand,
     delivery?: InboxDelivery,
   ): Promise<Readonly<ProcessWagerTransactionResult>> {
@@ -160,6 +213,7 @@ export class ProcessWagerTransactionUseCase {
       return await this.executeOnce(command, money, payloadHash, delivery);
     } catch (error) {
       if (error instanceof ConcurrentIdempotencyError) {
+        this.telemetry.increment('wager_retries_total', { worker: 'idempotency' });
         return this.executeOnce(command, money, payloadHash, delivery);
       }
 
@@ -210,6 +264,10 @@ export class ProcessWagerTransactionUseCase {
       command.externalTransactionId,
     );
     if (externalTransaction !== undefined) {
+      // Another process may commit between the two reads above.
+      if (externalTransaction.idempotencyKey === command.idempotencyKey) {
+        return this.replay(externalTransaction, payloadHash, command.idempotencyKey);
+      }
       throw new ExternalTransactionAlreadyExistsError(
         command.providerId,
         command.externalTransactionId,
@@ -231,6 +289,9 @@ export class ProcessWagerTransactionUseCase {
       command.externalTransactionId,
     );
     if (externalAfterLock !== undefined) {
+      if (externalAfterLock.idempotencyKey === command.idempotencyKey) {
+        return this.replay(externalAfterLock, payloadHash, command.idempotencyKey);
+      }
       throw new ExternalTransactionAlreadyExistsError(
         command.providerId,
         command.externalTransactionId,

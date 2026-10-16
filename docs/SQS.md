@@ -1,6 +1,6 @@
 # Consumo de apostas por SQS
 
-O consumidor inicia com a aplicação por padrão (`SQS_CONSUMER_ENABLED=true`). Usa o envelope `WagerTransactionRequested` do README. O `messageId` dentro do JSON identifica a mensagem na inbox; o `MessageId` gerado pelo SQS identifica a entrega no transporte. São identificadores distintos.
+O consumidor inicia com a aplicação por padrão (`SQS_CONSUMER_ENABLED=true`). Usa o envelope `WagerTransactionRequested` descrito abaixo e no [enunciado](DESAFIO.md). O `messageId` dentro do JSON identifica a mensagem na inbox; o `MessageId` gerado pelo SQS identifica a entrega no transporte. São identificadores distintos.
 
 Exemplo de corpo:
 
@@ -36,12 +36,12 @@ O hash da inbox é SHA-256 do JSON canônico dos campos validados de `data`, inc
 
 ## Falhas e novas tentativas
 
-| Situação | Comportamento |
-| --- | --- |
-| Processada, rejeitada por negócio ou `PENDING_REFERENCE` | Commit e ack; pendências passam ao worker de referências |
-| Banco/rede indisponíveis, wallet ainda inexistente ou falha de ack | Sem ack; retry por visibilidade com backoff de 1 segundo até 5 minutos |
-| Envelope inválido, conflito de inbox, chave de idempotência ou identificador externo | Envia à DLQ e só depois confirma a origem |
-| Falha ao enviar à DLQ | Preserva a origem para outra tentativa |
+| Situação                                                                             | Comportamento                                                          |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Processada, rejeitada por negócio ou `PENDING_REFERENCE`                             | Commit e ack; pendências passam ao worker de referências               |
+| Banco/rede indisponíveis, wallet ainda inexistente ou falha de ack                   | Sem ack; retry por visibilidade com backoff de 1 segundo até 5 minutos |
+| Envelope inválido, conflito de inbox, chave de idempotência ou identificador externo | Envia à DLQ e só depois confirma a origem                              |
+| Falha ao enviar à DLQ                                                                | Preserva a origem para outra tentativa                                 |
 
 O redrive configurado na fila principal leva falhas transitórias persistentes à DLQ após 5 recebimentos. Não há loop infinito de retries no consumidor. A DLQ recebe o corpo original e, em encaminhamentos explícitos, os atributos `failureCode` e `originalMessageId`. A publicação na DLQ também é at-least-once; duplicatas permanecem possíveis se o processo morrer entre o envio e o ack da origem.
 
