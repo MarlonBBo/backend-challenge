@@ -387,9 +387,9 @@ O caminho HTTP principal funciona e a correção financeira foi provada sob conc
 
 ### Bloco 4: consultas e operação
 
-- [ ] Implementar consulta de wallet.
+- [x] Implementar consulta de wallet.
 - [ ] Implementar ledger paginado por cursor estável e opaco.
-- [ ] Implementar consultas de transação interna e externa.
+- [x] Implementar consultas de transação interna e externa.
 - [ ] Implementar reconciliação sem correção automática.
 - [ ] Implementar `/health/live`.
 - [ ] Implementar `/health/ready` com PostgreSQL e SQS.

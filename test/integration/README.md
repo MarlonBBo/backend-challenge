@@ -25,4 +25,6 @@ Com `TEST_SQS_ENDPOINT`, também são executados os testes do consumidor contra 
 
 O banco deve ser exclusivo desta suíte, sem uma aplicação/worker externo consumindo suas pendências. Execute uma suíte por vez. Se uma execução for interrompida e deixar pendências, use um novo banco com sufixo `_test` para uma execução isolada.
 
+Com `TEST_DATABASE_URL`, também são executados os testes HTTP de consultas de carteira e transações. Eles iniciam uma API temporária em porta aleatória, exercitam os controllers e os readers reais e encerram a API ao final. Não iniciam workers. Os contratos estão em [docs/QUERIES.md](../../docs/QUERIES.md).
+
 Os testes do publicador usam outro banco, definido por `TEST_OUTBOX_DATABASE_URL`, além de `TEST_SQS_ENDPOINT`. Isso isola a seleção de eventos dos registros gerados pela suíte de referências. O setup e os cenários estão em [docs/OUTBOX.md](../../docs/OUTBOX.md).

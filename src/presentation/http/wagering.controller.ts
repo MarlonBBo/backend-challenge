@@ -10,6 +10,9 @@ import {
   NotFoundException,
   Post,
   Res,
+  Get,
+  Param,
+  Inject,
 } from '@nestjs/common';
 
 import {
@@ -23,6 +26,8 @@ import {
 import { ExternalTransactionAlreadyExistsError } from '../../application/wagering/ports/wagering-unit-of-work';
 import { WagerTransactionStatus } from '../../domain/wagering/wager-transaction';
 import { processWagerTransactionSchema } from '../../application/wagering/wager-transaction.schema';
+import { GetWagerTransactionUseCase } from '../../application/wagering/get-wager-transaction.use-case';
+import { queryIdentifier, queryResponse } from './query-response';
 
 interface PassthroughHttpResponse {
   status(code: number): unknown;
@@ -30,7 +35,17 @@ interface PassthroughHttpResponse {
 
 @Controller('wagering/transactions')
 export class WageringController {
-  constructor(private readonly processTransaction: ProcessWagerTransactionUseCase) {}
+  constructor(
+    @Inject(ProcessWagerTransactionUseCase)
+    private readonly processTransaction: ProcessWagerTransactionUseCase,
+    @Inject(GetWagerTransactionUseCase) private readonly getTransaction: GetWagerTransactionUseCase,
+  ) {}
+
+  @Get(':transactionId')
+  get(@Param('transactionId') transactionId: string) {
+    const id = queryIdentifier(transactionId, 'transactionId', true);
+    return queryResponse(() => this.getTransaction.execute({ transactionId: id }));
+  }
 
   @Post()
   async process(
